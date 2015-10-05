@@ -1,0 +1,5 @@
+- unarchive: src=kafka_2.10-0.8.2.1.tgz dest=/opt/
+- command: ln -s /opt/kafka_2.10-0.8.2.1 /opt/kafka
+- copy: src=etc/ dest=/etc/ owner=root
+- service: name=kafka enabled=yes state=started
+

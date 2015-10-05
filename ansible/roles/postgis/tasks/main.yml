@@ -1,0 +1,5 @@
+- shell: rpm -i http://fedora-epel.mirror.lstn.net/7/x86_64/e/epel-release-7-5.noarch.rpm
+  args:
+      creates: /etc/yum.repos.d/epel.repo
+- yum: name=postgis state=latest
+

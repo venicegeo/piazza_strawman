@@ -1,0 +1,17 @@
+[Unit]
+Description=Zookeeper configuration server
+DefaultDependencies=no
+After=
+Conflicts=
+Before=
+
+[Service]
+ExecStart=/opt/kafka/bin/zookeeper-server-start.sh /opt/kafka/config/zookeeper.properties
+## To not use augenrules, copy this file to /etc/systemd/system/auditd.service
+## and comment/delete the next line and uncomment the auditctl line.
+## NOTE: augenrules expect any rules to be added to /etc/audit/rules.d/
+# ExecStartPost=
+# ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+RequiredBy=kafka.service
