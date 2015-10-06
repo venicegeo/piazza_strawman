@@ -1,0 +1,14 @@
+package geoint;
+
+option java_package = "com.radiantblue.geoint.messages";
+option java_outer_classname = "GeoIntMessages";
+
+message Upload {
+    required string name = 1;
+}
+
+message Metadata {
+    required string name = 1;
+    required bytes checksum = 2;
+    required uint64 size = 3;
+}
