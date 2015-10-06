@@ -8,7 +8,7 @@ object GeoIntMessaging extends Build {
 
   lazy val root = project.in(file(".")).aggregate(messages, uploader, normalizer, persister).settings(commonSettings: _*)
   lazy val messages = project.settings(commonSettings: _*).settings(PB.protobufSettings: _*)
-  lazy val uploader = project.settings(commonSettings: _*)
-  lazy val normalizer = project.settings(commonSettings: _*)
-  lazy val persister = project.settings(commonSettings: _*)
+  lazy val uploader = project.settings(commonSettings: _*).dependsOn(messages)
+  lazy val normalizer = project.settings(commonSettings: _*).dependsOn(messages)
+  lazy val persister = project.settings(commonSettings: _*).dependsOn(messages)
 }
