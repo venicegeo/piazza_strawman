@@ -13,7 +13,7 @@ object Uploader {
     val config = new kafka.producer.ProducerConfig(props)
     val producer = new kafka.javaapi.producer.Producer[String, Array[Byte]](config)
     try {
-      val message = new kafka.producer.KeyedMessage[String, Array[Byte]](null, upload.toByteArray)
+      val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", upload.toByteArray)
       producer.send(message)
     } finally {
       producer.close
