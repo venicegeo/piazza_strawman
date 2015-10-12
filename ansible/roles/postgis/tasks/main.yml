@@ -2,4 +2,13 @@
   args:
       creates: /etc/yum.repos.d/epel.repo
 - yum: name=postgis state=latest
-
+- yum: name=postgresql-server state=latest
+- yum: name=python-psycopg2 state=latest
+- command: postgresql-setup initdb
+  args:
+      creates: /var/lib/pgsql/data/pg_hba.conf
+- replace: dest=/var/lib/pgsql/data/pg_hba.conf regexp='(^host.*)ident\s*$' replace='\1md5' backup=yes
+- service: name=postgresql enabled=yes state=started
+- include: postgres_setup.yml 
+  become: true
+  become_user: postgres

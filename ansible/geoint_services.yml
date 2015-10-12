@@ -4,4 +4,4 @@
   roles:
       - postgis
       - kafka
-        # - storm
+      - storm
