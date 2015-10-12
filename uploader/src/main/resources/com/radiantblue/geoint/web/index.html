@@ -1,0 +1,16 @@
+<html>
+    <body>
+        <h1>Datasets</h1>
+        <h2>Search</h2>
+        <form action="api/datasets" method="get">
+            <input type="text" name="keywords"/>
+            <input type="submit"/>
+        </form>
+        <h2>Upload</h2>
+        <form action="api/datasets" method="post" enctype="multipart/form-data">
+            <input type="file" name="data"/>
+            <input type="submit"/>
+        </form>
+        <script type="text/javascript" src="js/geoint.js"></script>
+    </body>
+</html>

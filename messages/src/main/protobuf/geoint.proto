@@ -5,10 +5,12 @@ option java_outer_classname = "Messages";
 
 message Upload {
     required string name = 1;
+    required string locator = 2;
 }
 
 message Metadata {
     required string name = 1;
-    required bytes checksum = 2;
-    required uint64 size = 3;
+    required string locator = 2;
+    required bytes checksum = 3;
+    required uint64 size = 4;
 }

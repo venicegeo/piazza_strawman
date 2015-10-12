@@ -5,7 +5,7 @@ import com.radiantblue.geoint.Messages
 object Uploader {
   def main(args: Array[String]): Unit = {
     val Array(filename) = args
-    val upload = Messages.Upload.newBuilder.setName(filename).build()
+    val upload = Messages.Upload.newBuilder.setName(filename).setLocator("/tmp/foo").build()
     val props = new java.util.Properties()
     props.put("zk.connect", "127.0.0.1:2181")
     props.put("serializer.class", "kafka.serializer.DefaultEncoder")
