@@ -5,26 +5,37 @@ import com.radiantblue.geoint.Messages
 
 object ExtractMetadata {
   private class MetadataBolt extends backtype.storm.topology.base.BaseRichBolt {
+    val logger = org.slf4j.LoggerFactory.getLogger(classOf[MetadataBolt])
     var _collector: backtype.storm.task.OutputCollector = _
 
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
       val upload = tuple.getValue(0).asInstanceOf[Messages.Upload]
+      logger.info("Upload {}", upload)
       val path = java.nio.file.Paths.get(new java.net.URI(upload.getLocator))
+      logger.info("path {}", path)
       val size = java.nio.file.Files.getAttribute(path, "size").asInstanceOf[java.lang.Long]
+      logger.info("size {}", size)
       val checksum = {
-        val channel = java.nio.file.Files.newByteChannel(path)
+        val stream = new java.io.FileInputStream(path.toFile)
         try {
-          val buff = java.nio.ByteBuffer.allocate(16384)
+          val buff = Array.ofDim[Byte](16384)
           var amountRead = 0
           val digest = java.security.MessageDigest.getInstance("MD5")
-          while ({ amountRead = channel.read(buff) ; amountRead >= 0 }) {
-            digest.update(buff.array(), 0, amountRead)
+          while ({
+            amountRead = stream.read(buff)
+            amountRead >= 0
+          }) {
+            digest.update(buff, 0, amountRead)
           }
           digest.digest()
-        } finally channel.close()
+        } finally {
+          stream.close()
+        }
       }
+      logger.info("checksum {}", checksum.map(b => f"$b%02X").mkString)
 
-      _collector.emit(java.util.Arrays.asList(upload.getName, upload.getLocator, checksum, size))
+      _collector.emit(tuple, java.util.Arrays.asList[AnyRef](upload.getName, upload.getLocator, checksum, size))
+      logger.info("emitted")
       _collector.ack(tuple)
     }
 
