@@ -8,6 +8,10 @@ import scala.concurrent.Future
 import akka.actor.Actor
 import spray.routing._
 import spray.http._, MediaTypes._
+import spray.httpx.SprayJsonSupport._
+import spray.httpx.unmarshalling._
+import spray.httpx.marshalling._
+import spray.json.DefaultJsonProtocol._
 
 class GeoIntServiceActor extends Actor with GeoIntService {
   def futureContext = context.dispatcher
@@ -64,19 +68,16 @@ trait GeoIntService extends HttpService {
               val iter = 
                 Iterator.continually(results).takeWhile(_.next).map(rs => (rs.getString(1), rs.getString(2), rs.getLong(3)))
 
+              import spray.json._
               val rows = iter.map { case (name, checksum, size) =>
-                <tr><td>{name}</td><td>{checksum}</td><td>{size}</td></tr>
+                import spray.json._
+                spray.json.JsObject(
+                  "name" -> JsString(name),
+                  "checksum" -> JsString(checksum),
+                  "size" -> JsNumber(size)
+                )
               }
-              <html>
-                <body>
-                  <h2> Search results </h2>
-                  <a href="/">Back to home page.</a>
-                  <table>
-                    <tr><th>Name</th><th>Checksum</th><th>Size</th></tr>
-                    { rows }
-                  </table>
-                </body>
-              </html>
+              JsObject("results" -> JsArray(rows.to[Vector]))
             } finally {
               results.close()
             }
@@ -96,12 +97,7 @@ trait GeoIntService extends HttpService {
             java.lang.Thread.sleep(500)
             fireUploadEvent(data.filename.getOrElse(""), path.toUri.toString)
 
-            <html>
-              <body>
-                <h2>Upload completed.</h2>
-                <a href="/">Back to home page.</a>
-              </body>
-            </html>
+            HttpResponse(status=StatusCodes.Found, headers=List(HttpHeaders.Location("/")))
           } }
         }
       }

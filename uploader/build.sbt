@@ -5,6 +5,7 @@ libraryDependencies ++= {
     "org.apache.kafka" %% "kafka" % "0.8.2.2",
     "org.postgresql" % "postgresql" % "9.4-1203-jdbc42",
     "io.spray"            %%  "spray-can"     % sprayV,
+    "io.spray"            %%  "spray-json"     % "1.3.2",
     "io.spray"            %%  "spray-routing" % sprayV,
     "io.spray"            %%  "spray-testkit" % sprayV  % "test",
     "com.typesafe.akka"   %%  "akka-actor"    % akkaV,
