@@ -10,7 +10,7 @@ object InspectGeoTiff {
       .setMinX(e.getMinimum(0))
       .setMaxX(e.getMaximum(0))
       .setMinY(e.getMinimum(1))
-      .setMaxY(e.getMinimum(1))
+      .setMaxY(e.getMaximum(1))
       .build())
 
   private def tryFindFormat(x: AnyRef): Option[org.geotools.coverage.grid.io.AbstractGridFormat] = 

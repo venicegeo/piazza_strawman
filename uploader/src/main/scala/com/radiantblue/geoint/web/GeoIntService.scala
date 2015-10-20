@@ -76,28 +76,53 @@ trait GeoIntService extends HttpService {
     path("datasets") {
       get {
         parameters("keywords") { keywords =>
-          complete(Future { 
-            val pstmt = jdbcConnection.prepareStatement("SELECT name, checksum, size FROM metadata WHERE name LIKE ? ORDER BY id LIMIT 10;")
-            pstmt.setString(1, s"%$keywords%")
-            val results = pstmt.executeQuery()
-            try {
-              val iter = 
-                Iterator.continually(results).takeWhile(_.next).map(rs => (rs.getString(1), rs.getString(2), rs.getLong(3)))
-
-              import spray.json._
-              val rows = iter.map { case (name, checksum, size) =>
-                import spray.json._
-                spray.json.JsObject(
-                  "name" -> JsString(name),
-                  "checksum" -> JsString(checksum),
-                  "size" -> JsNumber(size)
-                )
-              }
-              JsObject("results" -> JsArray(rows.to[Vector]))
-            } finally {
-              results.close()
+          import spray.json._, DefaultJsonProtocol._
+          complete(
+            """
+            {
+              "results": [{
+                "name": "sfdem.tif",
+                "size": 318995,
+                "checksum": "ffcb4cdeb48242770434109367a13721",
+                "latlon_bbox": null,
+                "native_srid": null
+                }, {
+                  "name": "sfdem.tif",
+                  "size": 318995,
+                  "checksum": "ffcb4cdeb48242770434109367a13721",
+                  "latlon_bbox": {
+                    "type": "LineString",
+                    "coordinates": [[-103.87100615361, 44.3702118700421], [-103.629326769082, 44.50162561960653]]
+                  },
+                  "native_srid": "EPSG:26713"
+                }]
             }
-          })
+            """.parseJson.asJsObject)
+          // complete(Future { 
+          //   val pstmt = jdbcConnection.prepareStatement("SELECT m.name, m.checksum, m.size, gm.native_srid, ST_AsGeoJson(gm.latlon_bounds) FROM metadata m LEFT JOIN geometadata gm USING (locator) WHERE name LIKE ? ORDER BY m.id LIMIT 10;")
+          //   pstmt.setString(1, s"%$keywords%")
+          //   val results = pstmt.executeQuery()
+          //   try {
+          //     import spray.json._
+
+          //     val iter = 
+          //       Iterator.continually(results).takeWhile(_.next).map(rs => (rs.getString(1), rs.getString(2), rs.getLong(3), Option(rs.getString(4)), Option(rs.getString(5)).map(_.parseJson)))
+
+          //     val rows = iter.map { case (name, checksum, size, native_srid, bbox) =>
+          //       import spray.json._
+          //       spray.json.JsObject(
+          //         "name" -> JsString(name),
+          //         "checksum" -> JsString(checksum),
+          //         "size" -> JsNumber(size),
+          //         "native_srid" -> native_srid.fold[JsValue](JsNull)(JsString(_)),
+          //         "latlon_bbox" -> bbox.getOrElse(JsNull)
+          //       )
+          //     }
+          //     JsObject("results" -> JsArray(rows.to[Vector]))
+          //   } finally {
+          //     results.close()
+          //   }
+          // })
         }
       } ~
       post {

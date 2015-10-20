@@ -3,8 +3,10 @@
     <head>
         <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
         <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap-theme.min.css">
-        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
-        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+        <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.7.5/leaflet.css" />
+        <style type="text/css">
+            #map { height: 180px; }
+        </style>
     </head>
     <body>
         <div class="container">
@@ -25,6 +27,7 @@
                             </div>
                         </form>
                         <div id='search-results'></div>
+                        <div id="map"> </div>
                     </div>
                 </div>
                 <div role="tabpanel" class="tab-pane" id="upload">
@@ -37,6 +40,9 @@
                 </div>
             </div>
         </div>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+        <script src="http://cdn.leafletjs.com/leaflet-0.7.5/leaflet.js"></script>
         <script type="text/javascript" src="js/geoint.js"></script>
     </body>
 </html>
