@@ -20,9 +20,27 @@ object MetadataTupleMapper extends storm.kafka.bolt.mapper.TupleToKafkaMapper[St
     }
 }
 
+object DirectTupleMapper extends storm.kafka.bolt.mapper.TupleToKafkaMapper[String, Array[Byte]] {
+  def getKeyFromTuple(tuple: backtype.storm.tuple.Tuple): String = null
+  def getMessageFromTuple(tuple: backtype.storm.tuple.Tuple): Array[Byte] = 
+    tuple.getValue(0).asInstanceOf[Array[Byte]]
+}
+
 object MetadataScheme extends backtype.storm.spout.Scheme {
-  def deserialize(bytes: Array[Byte]): java.util.List[AnyRef] =
-    java.util.Arrays.asList(com.radiantblue.geoint.Messages.Metadata.parseFrom(bytes))
+  private def maybe[T](parse: => T): Option[T] = 
+    try 
+      Some(parse)
+    catch {
+      case _: com.google.protobuf.InvalidProtocolBufferException => None
+    }
+
+  def deserialize(bytes: Array[Byte]): java.util.List[AnyRef] = {
+    val result = (
+      maybe(Messages.Metadata.parseFrom(bytes)) orElse 
+      maybe(Messages.GeoMetadata.parseFrom(bytes))
+    )
+    java.util.Arrays.asList(result.get)
+  }
   def getOutputFields(): backtype.storm.tuple.Fields =
     new backtype.storm.tuple.Fields("metadata")
 }

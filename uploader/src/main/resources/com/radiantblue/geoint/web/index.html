@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html>
     <head>
         <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
@@ -6,31 +7,33 @@
         <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
     </head>
     <body>
-        <h1> Datasets </h1>
-        <ul class="nav nav-tabs" id="geointnav">
-            <li role="presentation" class="active"><a href="#search" class="search" aria-controls="search" role="tab" data-toggle="tab">Search</a></li>
-            <li role="presentation"><a href="#upload" class="upload" aria-controls="upload" role="tab" data-toggle="tab">Upload</a></li>
-        </ul>
-        <div class="tab-content">
-            <div role="tabpanel" class="tab-pane active" id="search">
-                <div class="col-lg-6">
-                <form id='search-form' action="api/datasets" role="form" method="get">
-                    <div class="input-group">
-                        <input class="form-control" type="text" name="keywords"/>
-                        <div class="input-group-btn">
-                            <button class="btn btn-default" type="submit">Search</button>
-                        </div>
+        <div class="container">
+            <h1> Datasets </h1>
+            <ul class="nav nav-tabs" id="geointnav">
+                <li role="presentation" class="active"><a href="#search" class="search" aria-controls="search" role="tab" data-toggle="tab">Search</a></li>
+                <li role="presentation"><a href="#upload" class="upload" aria-controls="upload" role="tab" data-toggle="tab">Upload</a></li>
+            </ul>
+            <div class="tab-content">
+                <div role="tabpanel" class="tab-pane active" id="search">
+                    <div class="col-lg-6">
+                        <form id='search-form' action="api/datasets" role="form" method="get">
+                            <div class="input-group">
+                                <input class="form-control" type="text" name="keywords"/>
+                                <div class="input-group-btn">
+                                    <button class="btn btn-default" type="submit">Search</button>
+                                </div>
+                            </div>
+                        </form>
+                        <div id='search-results'></div>
                     </div>
-                </form>
-                <div id='search-results'></div>
                 </div>
-            </div>
-            <div role="tabpanel" class="tab-pane" id="upload">
-                <div class="col-lg-6">
-                <form id='upload-form' action="api/datasets" role="form" method="post" enctype="multipart/form-data">
-                    <input type="file" name="data"/>
-                    <button class="btn btn-default" type="submit">Upload</button>
-                </form>
+                <div role="tabpanel" class="tab-pane" id="upload">
+                    <div class="col-lg-6">
+                        <form id='upload-form' action="api/datasets" role="form" method="post" enctype="multipart/form-data">
+                            <input type="file" name="data"/>
+                            <button class="btn btn-default" type="submit">Upload</button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>

@@ -13,30 +13,46 @@ import spray.httpx.unmarshalling._
 import spray.httpx.marshalling._
 import spray.json.DefaultJsonProtocol._
 
+class Attempt[T](attempt: => T) {
+  private var result: Option[T] = None
+  def get: T = 
+    result match {
+      case Some(t) =>
+        t
+      case None => 
+        val x = attempt
+        result = Some(x)
+        x
+    }
+  def optional: Option[T] = result
+}
+
 class GeoIntServiceActor extends Actor with GeoIntService {
   def futureContext = context.dispatcher
   def actorRefFactory = context
   def receive = runRoute(geointRoute)
 
-  var kafkaProducer: kafka.javaapi.producer.Producer[String, Array[Byte]] = setupKafka
-  var jdbcConnection: java.sql.Connection = setupJdbc
+  def kafkaProducer: kafka.javaapi.producer.Producer[String, Array[Byte]] = attemptKafka.get
+  def jdbcConnection: java.sql.Connection = attemptJdbc.get
 
-  def setupKafka = {
+  private val attemptKafka = new Attempt({
     val props = new java.util.Properties()
     props.put("zk.connect", "127.0.0.1:2181")
     props.put("serializer.class", "kafka.serializer.DefaultEncoder")
     props.put("metadata.broker.list", "127.0.0.1:9092")
     val config = new kafka.producer.ProducerConfig(props)
     new kafka.javaapi.producer.Producer[String, Array[Byte]](config)
-  }
+  })
 
-  def setupJdbc = {
+  private val attemptJdbc = new Attempt({
     java.lang.Class.forName("org.postgresql.Driver")
     val props = new java.util.Properties()
     props.put("user", "geoint")
     props.put("password", "secret")
-    java.sql.DriverManager.getConnection("jdbc:postgresql://localhost/metadata", props)
-  }
+    java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
+  })
+
+  // TODO: Hook actor shutdown to close connections using attempt.optional.foreach { _.close }
 }
 
 trait GeoIntService extends HttpService {
@@ -94,7 +110,6 @@ trait GeoIntService extends HttpService {
             try {
               buffs.foreach { file.write(_) }
             } finally file.close()
-            java.lang.Thread.sleep(500)
             fireUploadEvent(data.filename.getOrElse(""), path.toUri.toString)
 
             HttpResponse(status=StatusCodes.Found, headers=List(HttpHeaders.Location("/")))

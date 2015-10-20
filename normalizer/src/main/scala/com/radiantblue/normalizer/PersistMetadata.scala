@@ -17,14 +17,37 @@ object PersistMetadata {
       // land in Storm 0.10 and provide connection pooling in a Storm-friendly
       // way.  For now we just connect and disconnect for each tuple processed
       // (slow!)
-      val metadata = tuple.getValue(0).asInstanceOf[Messages.Metadata]
-      val conn = java.sql.DriverManager.getConnection("jdbc:postgresql://localhost/metadata", props)
+      val conn = java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
       try {
-        val pstmt = conn.prepareStatement("INSERT INTO metadata (name, checksum, size) VALUES (?, ?, ?)")
-        pstmt.setString(1, metadata.getName)
-        pstmt.setString(2, metadata.getChecksum.asScala.map(b => f"$b%02x").mkString)
-        pstmt.setLong(3, metadata.getSize)
-        pstmt.executeUpdate()
+        tuple.getValue(0) match {
+          case metadata: Messages.Metadata =>
+            val pstmt = conn.prepareStatement("INSERT INTO metadata (name, locator, checksum, size) VALUES (?, ?, ?, ?)")
+            pstmt.setString(1, metadata.getName)
+            pstmt.setString(2, metadata.getLocator)
+            pstmt.setString(3, metadata.getChecksum.asScala.map(b => f"$b%02x").mkString)
+            pstmt.setLong(4, metadata.getSize)
+            pstmt.executeUpdate()
+          case geoMetadata: Messages.GeoMetadata => 
+            val pstmt = conn.prepareStatement("""
+INSERT INTO geometadata (locator, native_srid, native_bounds, latlon_bounds) VALUES ( 
+  ?,
+  ?, 
+  ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?)),
+  ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?))
+)
+""")
+            pstmt.setString(1, geoMetadata.getLocator)
+            pstmt.setString(2, geoMetadata.getCrsCode)
+            pstmt.setDouble(3, geoMetadata.getNativeBoundingBox.getMinX)
+            pstmt.setDouble(4, geoMetadata.getNativeBoundingBox.getMinY)
+            pstmt.setDouble(5, geoMetadata.getNativeBoundingBox.getMaxX)
+            pstmt.setDouble(6, geoMetadata.getNativeBoundingBox.getMaxY)
+            pstmt.setDouble(7, geoMetadata.getLatitudeLongitudeBoundingBox.getMinX)
+            pstmt.setDouble(8, geoMetadata.getLatitudeLongitudeBoundingBox.getMinY)
+            pstmt.setDouble(9, geoMetadata.getLatitudeLongitudeBoundingBox.getMaxX)
+            pstmt.setDouble(10, geoMetadata.getLatitudeLongitudeBoundingBox.getMaxY)
+            pstmt.executeUpdate()
+        }
         _collector.ack(tuple)
       } finally {
         conn.close()
@@ -36,7 +59,7 @@ object PersistMetadata {
     }
 
     def declareOutputFields(declarer: backtype.storm.topology.OutputFieldsDeclarer): Unit = {
-      declarer.declare(new backtype.storm.tuple.Fields("name", "checksum", "size"))
+      // no output
     }
   }
 
