@@ -5,7 +5,7 @@
         <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap-theme.min.css">
         <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.7.5/leaflet.css" />
         <style type="text/css">
-            #map { height: 180px; }
+            #map { height: 360px; }
         </style>
     </head>
     <body>
@@ -17,26 +17,30 @@
             </ul>
             <div class="tab-content">
                 <div role="tabpanel" class="tab-pane active" id="search">
-                    <div class="col-lg-6">
-                        <form id='search-form' action="api/datasets" role="form" method="get">
-                            <div class="input-group">
-                                <input class="form-control" type="text" name="keywords"/>
-                                <div class="input-group-btn">
-                                    <button class="btn btn-default" type="submit">Search</button>
+                    <div class="row">
+                        <div class="col-lg-6">
+                            <form id='search-form' action="api/datasets" role="form" method="get">
+                                <div class="input-group">
+                                    <input class="form-control" type="text" name="keywords"/>
+                                    <div class="input-group-btn">
+                                        <button class="btn btn-default" type="submit">Search</button>
+                                    </div>
                                 </div>
-                            </div>
-                        </form>
-                        <div id='search-results'></div>
-                        <div id="map"> </div>
+                            </form>
+                            <div id='search-results'></div>
+                        </div>
+                        <div class="col-lg-6" id="map"> </div>
                     </div>
                 </div>
                 <div role="tabpanel" class="tab-pane" id="upload">
-                    <div class="col-lg-6">
-                        <form id='upload-form' action="api/datasets" role="form" method="post" enctype="multipart/form-data">
+                    <form id='upload-form' action="api/datasets" role="form" method="post" enctype="multipart/form-data">
+                        <div class="form-group">
                             <input type="file" name="data"/>
+                        </div>
+                        <div class="form-group">
                             <button class="btn btn-default" type="submit">Upload</button>
-                        </form>
-                    </div>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
