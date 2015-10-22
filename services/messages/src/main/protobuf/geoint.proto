@@ -1,0 +1,30 @@
+package geoint;
+
+option java_package = "com.radiantblue.geoint";
+option java_outer_classname = "Messages";
+
+message Upload {
+    required string name = 1;
+    required string locator = 2;
+}
+
+message Metadata {
+    required string name = 1;
+    required string locator = 2;
+    required bytes checksum = 3;
+    required uint64 size = 4;
+}
+
+message GeoMetadata {
+    required string locator = 1;
+    required string crsCode = 2;
+    required BoundingBox nativeBoundingBox = 3;
+    required BoundingBox latitudeLongitudeBoundingBox = 4;
+
+    message BoundingBox {
+        required double minX = 1;
+        required double maxX = 2;
+        required double minY = 3;
+        required double maxY = 4;
+    }
+}
