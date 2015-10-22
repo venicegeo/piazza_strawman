@@ -1,1 +1,9 @@
 .vagrant/
+ansible/**/*.jar
+ansible/**/*.tar.gz
+ansible/**/*.tgz
+ansible/**/*.zip
+ansible/roles/deployer/files/geoserver-files
+ansible/roles/geoserver_file_receiver/files/geoserver-files.pub
+
+
