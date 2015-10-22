@@ -1,0 +1,7 @@
+---
+- hosts: all
+  sudo: yes
+  roles:
+      - { role: geoserver, control_port: 8181, http_port: 8081, name: geoserver1 }
+      - { role: geoserver, control_port: 8182, http_port: 8082, name: geoserver2 }
+      - ogcproxy

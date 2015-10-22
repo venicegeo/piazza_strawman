@@ -1,0 +1,5 @@
+- unarchive: src=ogcproxy-0.1-SNAPSHOT.tgz dest=/opt/
+- file: path=/opt/ogcproxy state=link src=/opt/ogcproxy-0.1-SNAPSHOT
+- copy: src=etc/ dest=/etc/ owner=root
+- service: name=ogcproxy enabled=yes state=restarted
+

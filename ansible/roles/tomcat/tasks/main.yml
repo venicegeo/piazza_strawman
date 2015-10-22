@@ -1,0 +1,2 @@
+- yum: name=tomcat state=latest
+- yum: name=tomcat-webapps state=latest

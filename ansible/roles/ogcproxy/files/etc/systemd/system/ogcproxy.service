@@ -1,0 +1,18 @@
+[Unit]
+Description=OGC service reverse proxy
+DefaultDependencies=no
+After=
+Conflicts=
+Before=
+Requires=
+
+[Service]
+ExecStart=/opt/ogcproxy/bin/ogcproxy
+## To not use augenrules, copy this file to /etc/systemd/system/auditd.service
+## and comment/delete the next line and uncomment the auditctl line.
+## NOTE: augenrules expect any rules to be added to /etc/audit/rules.d/
+# ExecStartPost=
+# ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multiuser.target

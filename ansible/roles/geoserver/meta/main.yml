@@ -1,0 +1,4 @@
+---
+dependencies:
+    - { role: tomcat }
+    - { role: geoserver_file_receiver }

@@ -13,7 +13,8 @@
         roles=geoint
         grant_option=yes
 - postgresql_ext: name=postgis db=metadata
-- command: psql metadata -c "CREATE TABLE IF NOT EXISTS metadata (id SERIAL PRIMARY KEY, name VARCHAR, checksum VARCHAR, size BIGINT);"
+- copy: src=metadata_tables.sql dest=/tmp/
+- command: psql metadata -f /tmp/metadata_tables.sql
 - postgresql_privs: >
         database=metadata
         state=present

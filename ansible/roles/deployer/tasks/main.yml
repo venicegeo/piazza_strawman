@@ -1,0 +1,2 @@
+- unarchive: src=deployer-0.1-SNAPSHOT.tgz dest=/opt/
+- file: path=/opt/deployer state=link src=/opt/deployer-0.1-SNAPSHOT

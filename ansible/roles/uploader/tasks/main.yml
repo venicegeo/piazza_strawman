@@ -1,0 +1,5 @@
+- unarchive: src=uploader-0.1-SNAPSHOT.tgz dest=/opt/
+- file: path=/opt/uploader state=link src=/opt/uploader-0.1-SNAPSHOT
+- copy: src=etc/ dest=/etc/ owner=root
+- service: name=uploader enabled=yes state=restarted
+
