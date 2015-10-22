@@ -9,6 +9,7 @@ $(function() {
         $(this).tab('upload')
     });
 
+    var lyr;
     $('#search-form').submit(function(e) { 
         e.preventDefault();
         $.get("api/datasets", $(this).serialize())
@@ -30,13 +31,15 @@ $(function() {
                  .map(function(row) { return L.rectangle(L.geoJson(row.latlon_bbox).getBounds()); })
              );
              var overall_bounds = bboxes.reduce(function(acc, el) { return acc.extend(el); });
-             var lyr = L.layerGroup(bboxes);
-             lyr.addTo(map); // L.geoJson(bboxes, { style: function() { return { "color" : "red" }; } }).addTo(map);
-             map.fitBounds(overall_bounds);
+             var newLyr = L.layerGroup(bboxes);
+             map.addLayer(newLyr);
+             lyr && map.removeLayer(lyr);
+             lyr = newLyr;
+             map.fitBounds(overall_bounds, { animate: true });
          });
     });
 
-    var map = L.map('map').setView([51.05, -0.09], 13);
+    var map = L.map('map').setView([0, 0], 2);
     L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {}).addTo(map);
 });
 

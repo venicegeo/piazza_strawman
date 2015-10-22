@@ -15,7 +15,7 @@ object PersistMetadata {
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
       // TODO: There is a pending 'storm-jdbc' module that looks like it will
       // land in Storm 0.10 and provide connection pooling in a Storm-friendly
-      // way.  For now we just connect and disconnect for each tuple processed
+      // way.  For now, just connect and disconnect for each tuple processed
       // (slow!)
       val conn = java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
       try {

@@ -20,9 +20,11 @@ class Attempt[T](attempt: => T) {
       case Some(t) =>
         t
       case None => 
-        val x = attempt
-        result = Some(x)
-        x
+        synchronized {
+          val x = attempt
+          result = Some(x)
+          x
+        }
     }
   def optional: Option[T] = result
 }
@@ -84,7 +86,13 @@ trait GeoIntService extends HttpService {
               import spray.json._
 
               val iter = 
-                Iterator.continually(results).takeWhile(_.next).map(rs => (rs.getString(1), rs.getString(2), rs.getLong(3), Option(rs.getString(4)), Option(rs.getString(5)).map(_.parseJson)))
+                Iterator.continually(results).takeWhile(_.next).map { rs => 
+                  (rs.getString(1),
+                   rs.getString(2),
+                   rs.getLong(3),
+                   Option(rs.getString(4)),
+                   Option(rs.getString(5)).map(_.parseJson))
+                }
 
               val rows = iter.map { case (name, checksum, size, native_srid, bbox) =>
                 JsObject(

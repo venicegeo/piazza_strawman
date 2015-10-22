@@ -13,12 +13,13 @@ object GeoIntMessaging extends Build {
     ),
     organization := "com.radiantblue",
     version := "0.1-SNAPSHOT",
+    scalacOptions += "-feature",
     scalaVersion := "2.10.6")
 
   lazy val root = project
     .in(file("."))
     .disablePlugins(AssemblyPlugin)
-    .aggregate(messages, ogcproxy, uploader, normalizer)
+    .aggregate(messages, ogcproxy, uploader, normalizer, deployer)
     .settings(commonSettings: _*)
   lazy val messages = project
     .disablePlugins(AssemblyPlugin)
@@ -38,4 +39,9 @@ object GeoIntMessaging extends Build {
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
     .settings(Revolver.settings: _*)
+  lazy val deployer = project
+    .enablePlugins(JavaAppPackaging)
+    .disablePlugins(AssemblyPlugin)
+    .settings(commonSettings: _*)
+    .dependsOn(messages)
 }
