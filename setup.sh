@@ -11,13 +11,20 @@ which vagrant
 which ansible
 which ssh-keygen
 which wget
+which java
 
+# Create an SSH key just for this deployment
 ssh-keygen -N '' -f geoserver-files
 mv geoserver-files ansible/roles/deployer/files/
 mv geoserver-files.pub ansible/roles/geoserver_file_receiver/files/
 
+# Build Scala services
+(cd services/ && sbt/bin/sbt assembly universal:packageZipTarball)
+
+# Copy built artifacts
 . copy_builds.sh
 
+# Fetch software from offline that yum won't fetch for us
 . third-party-downloads.sh
 
 echo Finished successfully - ready to run.
