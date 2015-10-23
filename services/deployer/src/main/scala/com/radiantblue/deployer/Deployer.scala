@@ -1,6 +1,6 @@
 package com.radiantblue.deployer
 
-import scala.concurrent.Future
+import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 import scala.sys.process._
 import akka.actor.ActorSystem
@@ -73,7 +73,7 @@ object Deployer {
       <nativeCoverageName>{nativeName}</nativeCoverageName>
     </coverage>
 
-  def deploy(name: String, locator: String, nativeBbox: Messages.GeoMetadata.BoundingBox, latlonBbox: Messages.GeoMetadata.BoundingBox, srid: String): Unit = {
+  def deploy(name: String, locator: String, nativeBbox: Messages.GeoMetadata.BoundingBox, latlonBbox: Messages.GeoMetadata.BoundingBox, srid: String): (StatusCode, StatusCode, StatusCode) = {
     implicit val timeout: Timeout = 5.seconds
     implicit val system: ActorSystem = ActorSystem("spray-client")
     import system.dispatcher
@@ -109,8 +109,8 @@ object Deployer {
         "-e", "ssh -oStrictHostKeyChecking=no -q -i/opt/deployer/geoserver-files",
         "--perms",
         "--chmod=u+rw,g+rw,o+r",
-        locator.drop("file://".length),
-        s"geoserver_files@$geoserverIp:/var/lib/geoserver_data/geoserver1/data/$cleanedLocator")
+        java.nio.file.Paths.get(new java.net.URI(locator)).toAbsolutePath.toString,
+        s"geoserver_files@$geoserverIp:/var/lib/geoserver_data/geoserver1/data/")
 
     val uploadF = 
       Future(uploadCommand.!).filter(_ == 0)
@@ -118,21 +118,96 @@ object Deployer {
     val resultF = for {
       _ <- uploadF
       deleteResult <- pipeline(Delete("/geoserver/rest/workspaces/geoint/coveragestores/sfdem?recurse=true"))
-      _ = println(deleteResult)
       storeResult <- pipeline(Post("/geoserver/rest/workspaces/geoint/coveragestores", storeCfg))
-      _ = println(storeResult)
       if storeResult.status.isSuccess
       coverageResult <- pipeline(Post("/geoserver/rest/workspaces/geoint/coveragestores/sfdem/coverages", layerCfg))
-      _ = println(coverageResult)
       if coverageResult.status.isSuccess
     } yield {
       (deleteResult.status, storeResult.status, coverageResult.status)
     }
     
     resultF.onComplete { x =>
-      println(x)
       system.shutdown()
     }
+    Await.result(resultF, Duration.Inf)
+  }
+
+  private def lookup(conn: java.sql.Connection, locator: String): Option[(String, String, Messages.GeoMetadata.BoundingBox, Messages.GeoMetadata.BoundingBox, Option[Boolean])] = {
+    val pstmt = conn.prepareStatement("""
+      SELECT 
+      m.name,
+      gm.native_srid,
+      ST_XMin(gm.native_bounds),
+      ST_XMax(gm.native_bounds),
+      ST_YMin(gm.native_bounds),
+      ST_YMax(gm.native_bounds),
+      ST_XMin(gm.latlon_bounds),
+      ST_XMax(gm.latlon_bounds),
+      ST_YMin(gm.latlon_bounds),
+      ST_YMax(gm.latlon_bounds),
+      d.deployed
+      FROM metadata m 
+      JOIN geometadata gm USING (locator) 
+      LEFT JOIN deployments d USING (locator)
+      WHERE locator = ?
+      LIMIT 1
+      """)
+    try {
+      pstmt.setString(1, locator)
+      val results = pstmt.executeQuery()
+      try {
+        if (results.next)
+          Some((
+            results.getString(1),
+            results.getString(2),
+            (Messages.GeoMetadata.BoundingBox.newBuilder
+              .setMinX(results.getDouble(3))
+              .setMaxX(results.getDouble(4))
+              .setMinY(results.getDouble(5))
+              .setMaxY(results.getDouble(6))
+              .build()),
+            (Messages.GeoMetadata.BoundingBox.newBuilder
+              .setMinX(results.getDouble(7))
+              .setMaxX(results.getDouble(8))
+              .setMinY(results.getDouble(9))
+              .setMaxY(results.getDouble(10))
+              .build()),
+            Option(results.getObject(11)).collect { case b: java.lang.Boolean => b.booleanValue }
+          ))
+        else
+          None
+      } finally results.close()
+    } finally pstmt.close()
+  }
+
+  def startDeployment(conn: java.sql.Connection, locator: String): Long = {
+              // "INSERT INTO deployments (locator, server, deployed) VALUES (?, ?, ?)"
+    val pstmt = conn.prepareStatement("INSERT INTO deployments (locator, server, deployed) VALUES (?, ?, false)",
+      java.sql.Statement.RETURN_GENERATED_KEYS)
+    try {
+      pstmt.setString(1, locator)
+      pstmt.setString(2, "192.168.33.14")
+      pstmt.executeUpdate()
+      val results = pstmt.getGeneratedKeys()
+      try {
+        results.next
+        results.getLong(1)
+      } finally results.close
+    } finally pstmt.close
+  }
+
+  def finishDeployment(conn: java.sql.Connection, id: Long): Unit = {
+    val pstmt = conn.prepareStatement("UPDATE deployments SET deployed = true WHERE id = ?");
+    try {
+      pstmt.setLong(1, id)
+      pstmt.execute()
+    } finally pstmt.close()
+  }
+
+  def failDeployment(conn: java.sql.Connection, id: Long): Unit = {
+    val pstmt = conn.prepareStatement("DELETE FROM deployments WHERE id = ?");
+    try pstmt.execute()
+    finally pstmt.close()
   }
 
   def main(args: Array[String]): Unit = {
@@ -146,56 +221,28 @@ object Deployer {
       java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
     }
 
-    val record = 
-      try {
-        val pstmt = conn.prepareStatement("""
-          SELECT 
-              m.name,
-              gm.native_srid,
-              ST_XMin(gm.native_bounds),
-              ST_XMax(gm.native_bounds),
-              ST_YMin(gm.native_bounds),
-              ST_YMax(gm.native_bounds),
-              ST_XMin(gm.latlon_bounds),
-              ST_XMax(gm.latlon_bounds),
-              ST_YMin(gm.latlon_bounds),
-              ST_YMax(gm.latlon_bounds)
-          FROM metadata m JOIN geometadata gm 
-          USING (locator) 
-          WHERE locator = ?
-          LIMIT 1
-          """)
-        try {
-          pstmt.setString(1, locator)
-          val results = pstmt.executeQuery()
-          try {
-              if (results.next)
-                Some((
-                  results.getString(1),
-                  results.getString(2),
-                  (Messages.GeoMetadata.BoundingBox.newBuilder
-                    .setMinX(results.getDouble(3))
-                    .setMaxX(results.getDouble(4))
-                    .setMinY(results.getDouble(5))
-                    .setMaxY(results.getDouble(6))
-                    .build()),
-                  (Messages.GeoMetadata.BoundingBox.newBuilder
-                    .setMinX(results.getDouble(7))
-                    .setMaxX(results.getDouble(8))
-                    .setMinY(results.getDouble(9))
-                    .setMaxY(results.getDouble(10))
-                    .build())
-                ))
-              else
-                None
-          } finally results.close()
-        } finally pstmt.close()
-      } finally conn.close()
+    try {
+      val record = lookup(conn, locator)
 
-    record match {
-      case Some((name, srid, nativeBounds, latlonBounds)) => 
-        deploy(name, locator, nativeBounds, latlonBounds, srid)
-      case None => println(s"No dataset found for locator ${args(0)}")
-    }
+      record match {
+        case Some((name, srid, nativeBounds, latlonBounds, deployed)) => 
+          deployed match {
+            case None =>
+              println("Deploying")
+              val id = startDeployment(conn, locator)
+              val (_, _, status) = deploy(name, locator, nativeBounds, latlonBounds, srid)
+              if (status.isSuccess) {
+                finishDeployment(conn, id)
+              } else {
+                failDeployment(conn, id)
+              }
+            case Some(false) =>
+              println("Still deploying")
+            case Some(true) =>
+              println("Deployed")
+          }
+        case None => println(s"No geospatial dataset found for locator ${args(0)}")
+      }
+    } finally conn.close()
   }
 }
