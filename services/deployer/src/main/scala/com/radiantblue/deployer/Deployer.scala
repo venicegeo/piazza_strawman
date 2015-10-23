@@ -27,10 +27,10 @@ object Deployer {
       <url>file:data/{file}</url>
     </coverageStore>
 
-  private def layerConfig(name: String, nativeBbox: Messages.GeoMetadata.BoundingBox, latlonBbox: Messages.GeoMetadata.BoundingBox, srid: String): scala.xml.NodeSeq =
+  private def layerConfig(name: String, nativeName: String, nativeBbox: Messages.GeoMetadata.BoundingBox, latlonBbox: Messages.GeoMetadata.BoundingBox, srid: String): scala.xml.NodeSeq =
     <coverage>
       <name>{name}</name>
-      <nativeName>{name}</nativeName>
+      <nativeName>{nativeName}</nativeName>
       <namespace>
         <name>geoint</name>
       </namespace>
@@ -70,7 +70,7 @@ object Deployer {
       <responseSRS>
         <string>{srid}</string>
       </responseSRS>
-      <nativeCoverageName>{name}</nativeCoverageName>
+      <nativeCoverageName>{nativeName}</nativeCoverageName>
     </coverage>
 
   def deploy(name: String, locator: String, nativeBbox: Messages.GeoMetadata.BoundingBox, latlonBbox: Messages.GeoMetadata.BoundingBox, srid: String): Unit = {
@@ -98,38 +98,41 @@ object Deployer {
     val cleanedName = name.takeWhile('.' != _)
     val cleanedLocator = locator.reverse.takeWhile('/' != _).reverse
     val storeCfg = storeConfig(cleanedName, cleanedLocator)
-    val layerCfg = layerConfig(cleanedName, nativeBbox, latlonBbox, srid)
+    val layerCfg = layerConfig(cleanedName, cleanedLocator, nativeBbox, latlonBbox, srid)
 
     implicit val NodeSeqMarshaller =
         Marshaller.delegate[scala.xml.NodeSeq, String](MediaTypes.`application/xml`)(_.toString)
 
     val uploadCommand =
       List(
-        "scp",
-        "-q",
-        "-oStrictHostKeyChecking=no",
-        "-i/opt/deployer/geoserver-files",
+        "rsync",
+        "-e", "ssh -oStrictHostKeyChecking=no -q -i/opt/deployer/geoserver-files",
+        "--perms",
+        "--chmod=u+rw,g+rw,o+r",
         locator.drop("file://".length),
         s"geoserver_files@$geoserverIp:/var/lib/geoserver_data/geoserver1/data/$cleanedLocator")
 
     val uploadF = 
       Future(uploadCommand.!).filter(_ == 0)
 
-    // val resultF = for {
-    //   _ <- uploadF
-    //   deleteResult <- pipeline(Delete("/geoserver/rest/workspaces/geoint/coveragestores/sfdem?recurse=true"))
-    //   storeResult <- pipeline(Post("/geoserver/rest/workspaces/geoint/coveragestores", storeCfg))
-    //   if storeResult.status.isSuccess
-    //   coverageResult <- pipeline(Post("/geoserver/rest/workspaces/geoint/coveragestores/sfdem/coverages", layerCfg))
-    //   if coverageResult.status.isSuccess
-    // } yield {
-    //   (deleteResult.status, storeResult.status, coverageResult.status)
-    // }
-    // 
-    // resultF.onComplete { x =>
-    //   println(x)
-    //   system.shutdown()
-    // }
+    val resultF = for {
+      _ <- uploadF
+      deleteResult <- pipeline(Delete("/geoserver/rest/workspaces/geoint/coveragestores/sfdem?recurse=true"))
+      _ = println(deleteResult)
+      storeResult <- pipeline(Post("/geoserver/rest/workspaces/geoint/coveragestores", storeCfg))
+      _ = println(storeResult)
+      if storeResult.status.isSuccess
+      coverageResult <- pipeline(Post("/geoserver/rest/workspaces/geoint/coveragestores/sfdem/coverages", layerCfg))
+      _ = println(coverageResult)
+      if coverageResult.status.isSuccess
+    } yield {
+      (deleteResult.status, storeResult.status, coverageResult.status)
+    }
+    
+    resultF.onComplete { x =>
+      println(x)
+      system.shutdown()
+    }
   }
 
   def main(args: Array[String]): Unit = {
