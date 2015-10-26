@@ -1,6 +1,6 @@
 package com.radiantblue.deployer
 
-import scala.concurrent.{ Await, Future }
+import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.sys.process._
 import akka.actor.ActorSystem
@@ -13,6 +13,11 @@ import spray.http._, HttpMethods._
 import spray.httpx.marshalling.Marshaller
 
 import com.radiantblue.geoint.Messages
+
+trait DeployStatus
+object Deploying extends DeployStatus
+case class Deployed(server: String) extends DeployStatus
+object Undeployable extends DeployStatus
 
 object Deployer {
   private def storeConfig(name: String, file: String): scala.xml.NodeSeq = 
@@ -73,10 +78,16 @@ object Deployer {
       <nativeCoverageName>{nativeName}</nativeCoverageName>
     </coverage>
 
-  def deploy(name: String, locator: String, nativeBbox: Messages.GeoMetadata.BoundingBox, latlonBbox: Messages.GeoMetadata.BoundingBox, srid: String): (StatusCode, StatusCode, StatusCode) = {
+  def deploy(
+    name: String,
+    locator: String,
+    nativeBbox: Messages.GeoMetadata.BoundingBox,
+    latlonBbox: Messages.GeoMetadata.BoundingBox,
+    srid: String)
+    (implicit system: ActorSystem): Future[(StatusCode, StatusCode, StatusCode)] =
+  {
     implicit val timeout: Timeout = 5.seconds
-    implicit val system: ActorSystem = ActorSystem("spray-client")
-    import system.dispatcher
+    implicit val context: ExecutionContext = system.dispatcher
 
     val geoserverIp = "192.168.23.13"
     val connectorF = 
@@ -115,8 +126,8 @@ object Deployer {
     val uploadF = 
       Future(uploadCommand.!).filter(_ == 0)
 
-    val resultF = for {
-      _ <- uploadF
+    for {
+      uploadResult <- uploadF
       deleteResult <- pipeline(Delete("/geoserver/rest/workspaces/geoint/coveragestores/sfdem?recurse=true"))
       storeResult <- pipeline(Post("/geoserver/rest/workspaces/geoint/coveragestores", storeCfg))
       if storeResult.status.isSuccess
@@ -125,11 +136,45 @@ object Deployer {
     } yield {
       (deleteResult.status, storeResult.status, coverageResult.status)
     }
-    
-    resultF.onComplete { x =>
-      system.shutdown()
+  }
+
+  def attemptDeploy
+    (locator: String)
+    (implicit system: ActorSystem): Future[DeployStatus] = {
+    Class.forName("org.postgresql.Driver")
+    implicit val context: ExecutionContext = system.dispatcher
+    val conn = {
+      val props = new java.util.Properties
+      props.put("user", "geoint")
+      props.put("password", "secret")
+      java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
     }
-    Await.result(resultF, Duration.Inf)
+
+    val result = 
+      Future(lookup(conn, locator)).flatMap { metadata =>
+          metadata match {
+            case Some((name, srid, nativeBounds, latlonBounds, None)) =>
+              val id = startDeployment(conn, locator)
+              for ((_, _, status) <- deploy(name, locator, nativeBounds, latlonBounds, srid)) yield
+                if (status.isSuccess) {
+                  finishDeployment(conn, id)
+                  Deployed("192.168.23.13")
+                } else {
+                  failDeployment(conn, id)
+                  Undeployable
+                }
+            case Some((_, _, _, _, Some(false))) =>
+              Future.successful(Deploying)
+            case Some((_, _, _, _, Some(true))) =>
+              Future.successful(Deployed("192.168.23.13"))
+            case None =>
+              Future.successful(Undeployable)
+          } 
+        }
+
+    result.onComplete { _ => conn.close() }
+
+    result
   }
 
   private def lookup(conn: java.sql.Connection, locator: String): Option[(String, String, Messages.GeoMetadata.BoundingBox, Messages.GeoMetadata.BoundingBox, Option[Boolean])] = {
@@ -181,12 +226,11 @@ object Deployer {
   }
 
   def startDeployment(conn: java.sql.Connection, locator: String): Long = {
-              // "INSERT INTO deployments (locator, server, deployed) VALUES (?, ?, ?)"
     val pstmt = conn.prepareStatement("INSERT INTO deployments (locator, server, deployed) VALUES (?, ?, false)",
       java.sql.Statement.RETURN_GENERATED_KEYS)
     try {
       pstmt.setString(1, locator)
-      pstmt.setString(2, "192.168.33.14")
+      pstmt.setString(2, "192.168.23.13")
       pstmt.executeUpdate()
       val results = pstmt.getGeneratedKeys()
       try {
@@ -206,7 +250,7 @@ object Deployer {
 
   def failDeployment(conn: java.sql.Connection, id: Long): Unit = {
     val pstmt = conn.prepareStatement("DELETE FROM deployments WHERE id = ?");
-    try pstmt.execute()
+    try     pstmt.execute()
     finally pstmt.close()
   }
 
@@ -214,35 +258,20 @@ object Deployer {
     Class.forName("org.postgresql.Driver")
     val locator = args(0)
 
-    val conn = {
-      val props = new java.util.Properties
-      props.put("user", "geoint")
-      props.put("password", "secret")
-      java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
-    }
+    implicit val system: ActorSystem = ActorSystem("spray-client")
+    import system.dispatcher
 
-    try {
-      val record = lookup(conn, locator)
-
-      record match {
-        case Some((name, srid, nativeBounds, latlonBounds, deployed)) => 
-          deployed match {
-            case None =>
-              println("Deploying")
-              val id = startDeployment(conn, locator)
-              val (_, _, status) = deploy(name, locator, nativeBounds, latlonBounds, srid)
-              if (status.isSuccess) {
-                finishDeployment(conn, id)
-              } else {
-                failDeployment(conn, id)
-              }
-            case Some(false) =>
-              println("Still deploying")
-            case Some(true) =>
-              println("Deployed")
-          }
-        case None => println(s"No geospatial dataset found for locator ${args(0)}")
+    val printF = 
+      for (result <- attemptDeploy(locator)) yield {
+        result match {
+          case Deploying => println("Deploying")
+          case Deployed(_) => println("Deployed")
+          case Undeployable => println(s"Cannot deploy dataset with locator '$locator'")
+        }
       }
-    } finally conn.close()
+
+    printF.onComplete { _ =>
+      system.shutdown()
+    }
   }
 }

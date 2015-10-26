@@ -13,7 +13,7 @@ object GeoIntMessaging extends Build {
     ),
     organization := "com.radiantblue",
     version := "0.1-SNAPSHOT",
-    scalacOptions += "-feature",
+    scalacOptions ++= List("-feature", "-deprecation"),
     scalaVersion := "2.10.6")
 
   lazy val root = project
@@ -30,7 +30,7 @@ object GeoIntMessaging extends Build {
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
     .settings(Revolver.settings: _*)
-    .dependsOn(messages)
+    .dependsOn(messages, deployer)
   lazy val normalizer = project
     .settings(commonSettings: _*)
     .dependsOn(messages)

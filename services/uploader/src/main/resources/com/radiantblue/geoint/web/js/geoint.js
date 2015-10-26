@@ -19,15 +19,28 @@ $(function() {
              data.results.forEach(function(row) {
                  var tr = $("<tr>");
                  tr.append($("<td>").text(row.name));
+                 tr.append($("<td>").text(row.checksum));
                  tr.append($("<td>").text(row.size));
-                 tr.append($("<td>").text(row.native_srid || "<None>"));
                  var td = $("<td>");
-                 var btn = $("<button class='btn btn-default'>Create</button>")
-                 btn.on('click', function(e) {
-                     e.preventDefault();
-                     btn.replaceWith($("<a href='#' title='Copy to WMS client'>Capabilities</a>"));
-                 });
-                 td.append(btn);
+                 if (row.deployment_server != null) {
+                     td.append($("<a href='http://" + row.deployment_server + ":8081/geoserver/ows?service=wms&version=1.3.0&request=GetCapabilities' title='Copy to WMS client'>Capabilities</a>"))
+                 } else if (row.native_srid != null) {
+                     var btn = $("<button class='btn btn-default'>Create</button>");
+                     td.append(btn);
+                     btn.on('click', function() {
+                         $.ajax({
+                             url: "/api/deployments/", 
+                             method: "POST",
+                             data: { "dataset": row.locator },
+                             success: function(data) { 
+                                 var server = data.servers[0];
+                                 btn.replaceWith($("<a href='http://" + server + ":8081/geoserver/ows?service=wms&version=1.3.0&request=GetCapabilities' title='Copy to WMS client'>Capabilities</a>"));
+                             }
+                         });
+                     });
+                 } else {
+                     td.text("Not spatial");
+                 }
                  tr.append(td);
                  table.append(tr);
              });
@@ -49,4 +62,3 @@ $(function() {
     var map = L.map('map').setView([0, 0], 2);
     L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {}).addTo(map);
 });
-
