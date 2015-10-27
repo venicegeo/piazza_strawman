@@ -33,12 +33,13 @@ object GeoIntMessaging extends Build {
     .dependsOn(messages, deployer)
   lazy val normalizer = project
     .settings(commonSettings: _*)
-    .dependsOn(messages)
+    .dependsOn(messages, deployer)
   lazy val ogcproxy = project
     .enablePlugins(JavaAppPackaging)
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
     .settings(Revolver.settings: _*)
+    .dependsOn(deployer)
   lazy val deployer = project
     .enablePlugins(JavaAppPackaging)
     .disablePlugins(AssemblyPlugin)

@@ -134,18 +134,12 @@ trait GeoIntService extends HttpService {
     } ~
     post {
       formFields("data".as[BodyPart]) { data => 
-        complete { Future {
-          val buffs = data.entity.data.toByteString.asByteBuffers
-          val path = java.nio.file.Files.createTempFile(
-            java.nio.file.Paths.get("/tmp"), "geoint", "upload")
-          val file = java.nio.file.Files.newByteChannel(path, java.nio.file.StandardOpenOption.WRITE)
-          try {
-            buffs.foreach { file.write(_) }
-          } finally file.close()
-          fireUploadEvent(data.filename.getOrElse(""), path.toUri.toString)
-
-          HttpResponse(status=StatusCodes.Found, headers=List(HttpHeaders.Location("/")))
-        } }
+        complete { 
+          (new com.radiantblue.deployer.FileSystemDatasetStorage()).store(data).map { locator =>
+            fireUploadEvent(data.filename.getOrElse(""), locator)
+            HttpResponse(status=StatusCodes.Found, headers=List(HttpHeaders.Location("/")))
+          }
+        }
       }
     }
 
@@ -175,7 +169,7 @@ trait GeoIntService extends HttpService {
       rawPathPrefix(Slash) {
         (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
           complete {
-            Deployer.attemptDeploy(dataset).map { 
+            deployer.attemptDeploy(dataset).map { 
               case Deploying =>
                 HttpResponse(StatusCodes.Accepted, "Deploying")
               case Deployed(server) => 
@@ -188,6 +182,14 @@ trait GeoIntService extends HttpService {
         }
       }
     }
+
+  def deployer = 
+    Deploy(
+      new PostgresMetadataStore(jdbcConnection),
+      new FileSystemDatasetStorage(),
+      new OpenSSHProvision("geoserver_files", java.nio.file.Paths.get("/opt/deployer/geoserver-files")),
+      new GeoServerPublish("admin", "geoserver"),
+      new PostgresTrack(jdbcConnection))
 
   private val apiRoute =
     pathPrefix("datasets") { datasetsApi } ~ 

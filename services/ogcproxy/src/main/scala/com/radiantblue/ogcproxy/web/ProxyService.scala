@@ -88,20 +88,36 @@ trait ProxyService extends HttpService with Proxy {
         case WMS => caseFoldedParameter("LAYERS").filter(! _.contains(',')) | reject(MalformedQueryParamRejection("LAYERS", "Cannot proxy requests for multiple layers (no comma allowed!)"))
       }
 
-  val lookup: String => Future[Uri] = {
-    id =>
-      Future.successful {
-        if (id.## % 2 == 0)
-          "http://localhost:8081/"
-        else
-          "http://localhost:8082/"
+  val lookup: String => Future[Uri] =
+    id => {
+      Class.forName("org.postgresql.Driver")
+      val conn = {
+        val props = new java.util.Properties
+        props.put("user", "geoint")
+        props.put("password", "secret")
+        java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
       }
-  }
+      val uriF: Future[Uri] =
+        for {
+          servers <- (new com.radiantblue.deployer.PostgresTrack(conn)).deployments(id)
+          if servers.nonEmpty
+        } yield {
+          val server = servers(1 % servers.size)
+          s"http://${server.address}:${server.port}"
+        }
+      uriF.onComplete(_ => conn.close())
+      uriF
+    }
 
   def proxyRoute: Route = 
     pathPrefix("geoserver") { 
-      datasetId { id =>
-        onSuccess(lookup(id)) { proxyToAuthority }
+      datasetId { layer =>
+        val id = layer.replaceFirst("^geoint:", "")
+        import scala.util.{ Success, Failure }
+        onComplete(lookup(id)) {
+          case Success(url) => proxyToAuthority(url)
+          case Failure(ex) => complete(StatusCodes.NotFound, s"No dataset with locator $id is deployed")
+        }
       } ~
       ogcService {
         case WMS => getFromResource("com/radiantblue/ogcproxy/wms-capabilities.xml")

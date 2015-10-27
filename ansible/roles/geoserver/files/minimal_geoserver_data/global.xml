@@ -1,5 +1,8 @@
 <global>
   <contact/>
+  <settings>
+      <proxyBaseUrl>http://192.168.23.13:8080/geoserver/</proxyBaseUrl>
+  </settings>
   <jai>
     <allowInterpolation>false</allowInterpolation>
     <recycling>true</recycling>
