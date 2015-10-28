@@ -4,6 +4,7 @@ import sbtprotobuf.{ ProtobufPlugin => PB }
 import com.typesafe.sbt.packager.archetypes.JavaAppPackaging
 import sbtassembly.AssemblyPlugin
 import spray.revolver.RevolverPlugin._
+import play.twirl.sbt.SbtTwirl
 
 object GeoIntMessaging extends Build {
   val commonSettings = Seq(
@@ -26,7 +27,7 @@ object GeoIntMessaging extends Build {
     .settings(commonSettings: _*)
     .settings(PB.protobufSettings: _*)
   lazy val uploader = project
-    .enablePlugins(JavaAppPackaging)
+    .enablePlugins(JavaAppPackaging, SbtTwirl)
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
     .settings(Revolver.settings: _*)

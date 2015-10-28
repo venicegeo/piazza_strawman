@@ -23,7 +23,7 @@ $(function() {
                  tr.append($("<td>").text(row.size));
                  var td = $("<td>");
                  if (row.deployment_server != null) {
-                     td.append($("<a href='http://" + row.deployment_server + ":8081/geoserver/ows?service=wms&version=1.3.0&request=GetCapabilities' title='Copy to WMS client'>Capabilities</a>"))
+                     td.append($("<a href='/api/deployments?dataset=" + row.locator + "&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities' title='Copy to WMS client'>Capabilities</a>"))
                  } else if (row.native_srid != null) {
                      var btn = $("<button class='btn btn-default'>Create</button>");
                      td.append(btn);
@@ -34,7 +34,7 @@ $(function() {
                              data: { "dataset": row.locator },
                              success: function(data) { 
                                  var server = data.servers[0];
-                                 btn.replaceWith($("<a href='http://" + server + ":8081/geoserver/ows?service=wms&version=1.3.0&request=GetCapabilities' title='Copy to WMS client'>Capabilities</a>"));
+                                 btn.replaceWith($("<a href='/api/deployments?dataset=" + row.locator + "&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities' title='Copy to WMS client'>Capabilities</a>"));
                              }
                          });
                      });

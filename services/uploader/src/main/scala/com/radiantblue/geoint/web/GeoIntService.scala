@@ -9,6 +9,7 @@ import scala.concurrent.Future
 import akka.actor.{ Actor, ActorSystem }
 import spray.routing._
 import spray.http._, MediaTypes._
+import spray.httpx.PlayTwirlSupport._
 import spray.httpx.SprayJsonSupport._
 import spray.httpx.unmarshalling._
 import spray.httpx.marshalling._
@@ -145,24 +146,91 @@ trait GeoIntService extends HttpService {
 
   private val deploymentsApi =
     get { 
-      parameters('dataset) { dataset =>
-        complete { Future {
-          import spray.json._
-
-          val statement = jdbcConnection.prepareStatement("SELECT server FROM deployments WHERE locator = ?")
-          try {
-            statement.setString(1, dataset)
-            val results = statement.executeQuery()
-            try {
-              val iter = Iterator.continually(results).takeWhile(_.next).map { rs =>
-                rs.getString(1)
+      parameters('dataset, 'SERVICE.?, 'VERSION.?, 'REQUEST.?) { (dataset, service, version, request) =>
+        (service, version, request) match {
+          case (Some("WMS"), Some("1.3.0"), Some("GetCapabilities")) => 
+            complete {
+              Future {
+                val pstmt = jdbcConnection.prepareStatement(
+                  """
+                  SELECT 
+                    m.name,
+                    m.checksum,
+                    m.size,
+                    m.locator,
+                    gm.native_srid,
+                    ST_XMin(gm.native_bounds),
+                    ST_XMax(gm.native_bounds),
+                    ST_YMin(gm.native_bounds),
+                    ST_YMax(gm.native_bounds),
+                    ST_XMin(gm.latlon_bounds),
+                    ST_XMax(gm.latlon_bounds),
+                    ST_YMin(gm.latlon_bounds),
+                    ST_YMax(gm.latlon_bounds)
+                  FROM metadata m 
+                    JOIN geometadata gm USING (locator)
+                    JOIN deployments d USING (locator)
+                  WHERE d.deployed = TRUE 
+                  AND locator = ?
+                  """)
+                try {
+                  pstmt.setString(1, dataset)
+                  val rs = pstmt.executeQuery()
+                  try {
+                    if (rs.next) {
+                      val md = Messages.Metadata.newBuilder()
+                        .setName(rs.getString(1))
+                        .setChecksum(com.google.protobuf.ByteString.copyFrom(rs.getBytes(2)))
+                        .setSize(rs.getLong(3))
+                        .setLocator(rs.getString(4))
+                        .build()
+                      val geo = Messages.GeoMetadata.newBuilder()
+                        .setLocator(rs.getString(4))
+                        .setCrsCode(rs.getString(5))
+                        .setNativeBoundingBox(Messages.GeoMetadata.BoundingBox.newBuilder()
+                          .setMinX(rs.getDouble(6))
+                          .setMaxX(rs.getDouble(7))
+                          .setMinY(rs.getDouble(8))
+                          .setMaxY(rs.getDouble(9))
+                          .build())
+                        .setLatitudeLongitudeBoundingBox(Messages.GeoMetadata.BoundingBox.newBuilder()
+                          .setMinX(rs.getDouble(10))
+                          .setMaxX(rs.getDouble(11))
+                          .setMinY(rs.getDouble(12))
+                          .setMaxY(rs.getDouble(13))
+                          .build())
+                        .build()
+                      xml.wms_1_3_0(Vector((md, geo)))
+                    } else {
+                      xml.wms_1_3_0(Vector.empty)
+                    }
+                  } finally rs.close()
+                } finally {
+                  pstmt.close()
+                }
               }
-              JsObject("servers" -> JsArray(iter.map(JsString(_)).to[Vector]))
-            } finally results.close()
-          } finally {
-            statement.close()
-          }
-        } }
+            }
+          case _ =>
+            complete { 
+              Future {
+                import spray.json._
+
+                val statement = jdbcConnection.prepareStatement("SELECT server FROM deployments WHERE locator = ?")
+                try {
+                  statement.setString(1, dataset)
+                  val results = statement.executeQuery()
+                  try {
+                    val iter = Iterator.continually(results).takeWhile(_.next).map { rs =>
+                      rs.getString(1)
+                    }
+                    JsObject("servers" -> JsArray(iter.map(JsString(_)).to[Vector]))
+                  } finally results.close()
+                } finally {
+                  statement.close()
+                }
+              }
+            }
+        }
       }
     } ~
     post {
