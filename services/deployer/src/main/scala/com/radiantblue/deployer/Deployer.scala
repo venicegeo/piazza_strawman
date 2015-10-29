@@ -280,19 +280,28 @@ object Deployer {
     implicit val system: ActorSystem = ActorSystem("spray-client")
     import system.dispatcher
 
-    val postgresConnection = {
-      val props = new java.util.Properties()
-      props.put("user", "geoint")
-      props.put("password", "secret")
-      java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
+    val postgresConnection = Postgres.connect()
+    val config = com.typesafe.config.ConfigFactory.load()
+
+    val provisioner = {
+      val geoserver = config.getConfig("geoint.geoserver")
+      val sshUser = geoserver.getString("ssh.user")
+      val sshKey = geoserver.getString("ssh.key")
+      new OpenSSHProvision(sshUser, java.nio.file.Paths.get(sshKey))
+    }
+    val publisher = {
+      val geoserver = config.getConfig("geoint.geoserver")
+      val restUser = geoserver.getString("rest.user")
+      val restPassword = geoserver.getString("rest.password")
+      new GeoServerPublish(restUser, restPassword)
     }
 
     val deployer = 
       Deploy(
         new PostgresMetadataStore(postgresConnection),
         new FileSystemDatasetStorage(),
-        new OpenSSHProvision("geoserver_files", java.nio.file.Paths.get("/opt/deployer/geoserver-files")),
-        new GeoServerPublish("admin", "geoserver"),
+        provisioner,
+        publisher,
         new PostgresTrack(postgresConnection))
 
     val printF = 
