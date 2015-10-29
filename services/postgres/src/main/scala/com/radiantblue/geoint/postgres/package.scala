@@ -244,5 +244,39 @@ package object postgres {
         }).headOption
       }
     }
+
+    def insertMetadata(md: Metadata): Unit = {
+      val sql = "INSERT INTO metadata (name, locator, checksum, size) VALUES (?, ?, ?, ?)"
+      prepare(sql) { ps =>
+        ps.setString(1, md.getName)
+        ps.setString(2, md.getLocator)
+        ps.setString(3, md.getChecksum.toByteArray.map(b => f"$b%02x").mkString)
+        ps.setLong(4, md.getSize)
+        ps.executeUpdate()
+      }
+    }
+
+    def insertGeoMetadata(g: GeoMetadata): Unit = {
+      val sql = ("""
+      INSERT INTO geometadata (locator, native_srid, native_bounds, latlon_bounds) VALUES ( 
+        ?,
+        ?, 
+        ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?)),
+        ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?))
+      ) """)
+      prepare(sql) { ps =>
+        ps.setString(1, g.getLocator)
+        ps.setString(2, g.getCrsCode)
+        ps.setDouble(3, g.getNativeBoundingBox.getMinX)
+        ps.setDouble(4, g.getNativeBoundingBox.getMinY)
+        ps.setDouble(5, g.getNativeBoundingBox.getMaxX)
+        ps.setDouble(6, g.getNativeBoundingBox.getMaxY)
+        ps.setDouble(7, g.getLatitudeLongitudeBoundingBox.getMinX)
+        ps.setDouble(8, g.getLatitudeLongitudeBoundingBox.getMinY)
+        ps.setDouble(9, g.getLatitudeLongitudeBoundingBox.getMaxX)
+        ps.setDouble(10, g.getLatitudeLongitudeBoundingBox.getMaxY)
+        ps.executeUpdate()
+      }
+    }
   }
 }

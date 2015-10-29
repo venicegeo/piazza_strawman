@@ -3,12 +3,9 @@ package com.radiantblue.normalizer
 import scala.collection.JavaConverters._
 import com.radiantblue.normalizer.mapper._
 import com.radiantblue.geoint.Messages
+import com.radiantblue.geoint.postgres._
 
 object PersistMetadata {
-  private val props = new java.util.Properties()
-  props.put("user", "geoint")
-  props.put("password", "secret")
-
   private class PersistBolt extends backtype.storm.topology.base.BaseRichBolt {
     var _collector: backtype.storm.task.OutputCollector = _
 
@@ -17,36 +14,11 @@ object PersistMetadata {
       // land in Storm 0.10 and provide connection pooling in a Storm-friendly
       // way.  For now, just connect and disconnect for each tuple processed
       // (slow!)
-      val conn = java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
+      val conn = Postgres.connect()
       try {
         tuple.getValue(0) match {
-          case metadata: Messages.Metadata =>
-            val pstmt = conn.prepareStatement("INSERT INTO metadata (name, locator, checksum, size) VALUES (?, ?, ?, ?)")
-            pstmt.setString(1, metadata.getName)
-            pstmt.setString(2, metadata.getLocator)
-            pstmt.setString(3, metadata.getChecksum.asScala.map(b => f"$b%02x").mkString)
-            pstmt.setLong(4, metadata.getSize)
-            pstmt.executeUpdate()
-          case geoMetadata: Messages.GeoMetadata => 
-            val pstmt = conn.prepareStatement("""
-INSERT INTO geometadata (locator, native_srid, native_bounds, latlon_bounds) VALUES ( 
-  ?,
-  ?, 
-  ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?)),
-  ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?))
-)
-""")
-            pstmt.setString(1, geoMetadata.getLocator)
-            pstmt.setString(2, geoMetadata.getCrsCode)
-            pstmt.setDouble(3, geoMetadata.getNativeBoundingBox.getMinX)
-            pstmt.setDouble(4, geoMetadata.getNativeBoundingBox.getMinY)
-            pstmt.setDouble(5, geoMetadata.getNativeBoundingBox.getMaxX)
-            pstmt.setDouble(6, geoMetadata.getNativeBoundingBox.getMaxY)
-            pstmt.setDouble(7, geoMetadata.getLatitudeLongitudeBoundingBox.getMinX)
-            pstmt.setDouble(8, geoMetadata.getLatitudeLongitudeBoundingBox.getMinY)
-            pstmt.setDouble(9, geoMetadata.getLatitudeLongitudeBoundingBox.getMaxX)
-            pstmt.setDouble(10, geoMetadata.getLatitudeLongitudeBoundingBox.getMaxY)
-            pstmt.executeUpdate()
+          case metadata: Messages.Metadata => conn.insertMetadata(metadata)
+          case geoMetadata: Messages.GeoMetadata => conn.insertGeoMetadata(geoMetadata)
         }
         _collector.ack(tuple)
       } finally {
