@@ -22,9 +22,9 @@ $(function() {
                  tr.append($("<td>").text(row.checksum));
                  tr.append($("<td>").text(row.size));
                  var td = $("<td>");
-                 if (row.deployment_server != null) {
+                 if (row.deploymentServer != null) {
                      td.append($("<a href='/api/deployments?dataset=" + row.locator + "&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities' title='Copy to WMS client'>Capabilities</a>"))
-                 } else if (row.native_srid != null) {
+                 } else if (row.nativeSrid != null) {
                      var btn = $("<button class='btn btn-default'>Create</button>");
                      td.append(btn);
                      btn.on('click', function() {
@@ -47,15 +47,15 @@ $(function() {
              $("#search-results").empty().append(table);
 
              var bboxes = (data.results
-                 .filter(function(row) { return row.latlon_bbox != null; })
-                 .map(function(row) { return L.rectangle(L.geoJson(row.latlon_bbox).getBounds()); })
+                 .filter(function(row) { return row.latlonBbox != null; })
+                 .map(function(row) { return L.rectangle(L.geoJson(row.latlonBbox).getBounds()); })
              );
-             var overall_bounds = bboxes.reduce(function(acc, el) { return acc.extend(el); });
+             var overallBounds = bboxes.reduce(function(acc, el) { return acc.extend(el); });
              var newLyr = L.layerGroup(bboxes);
              map.addLayer(newLyr);
              lyr && map.removeLayer(lyr);
              lyr = newLyr;
-             map.fitBounds(overall_bounds, { animate: true });
+             map.fitBounds(overallBounds, { animate: true });
          });
     });
 

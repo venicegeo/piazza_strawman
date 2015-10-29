@@ -20,9 +20,9 @@ object GeoIntMessaging extends Build {
   lazy val root = project
     .in(file("."))
     .disablePlugins(AssemblyPlugin)
-    .aggregate(messages, ogcproxy, uploader, normalizer, deployer)
+    .aggregate(core, ogcproxy, uploader, normalizer, deployer, postgres, kafka)
     .settings(commonSettings: _*)
-  lazy val messages = project
+  lazy val core = project
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
     .settings(PB.protobufSettings: _*)
@@ -31,19 +31,27 @@ object GeoIntMessaging extends Build {
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
     .settings(Revolver.settings: _*)
-    .dependsOn(messages, deployer)
+    .dependsOn(core, deployer, kafka, postgres)
   lazy val normalizer = project
     .settings(commonSettings: _*)
-    .dependsOn(messages, deployer)
+    .dependsOn(core, deployer)
   lazy val ogcproxy = project
     .enablePlugins(JavaAppPackaging)
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
     .settings(Revolver.settings: _*)
     .dependsOn(deployer)
+  lazy val kafka = project
+    .disablePlugins(AssemblyPlugin)
+    .settings(commonSettings: _*)
+    .dependsOn(core)
+  lazy val postgres = project
+    .disablePlugins(AssemblyPlugin)
+    .settings(commonSettings: _*)
+    .dependsOn(core)
   lazy val deployer = project
     .enablePlugins(JavaAppPackaging)
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
-    .dependsOn(messages)
+    .dependsOn(core, postgres)
 }
