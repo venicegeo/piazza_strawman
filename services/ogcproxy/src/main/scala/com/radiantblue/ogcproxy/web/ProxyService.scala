@@ -1,5 +1,7 @@
 package com.radiantblue.ogcproxy.web
 
+import com.radiantblue.geoint.postgres._
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 
@@ -14,7 +16,6 @@ class ProxyServiceActor extends Actor with ProxyService {
   implicit val system = context.system
   def futureContext = context.dispatcher
   def actorRefFactory = context
-
   def receive = runRoute(proxyRoute)
 }
 
@@ -90,22 +91,16 @@ trait ProxyService extends HttpService with Proxy {
 
   val lookup: String => Future[Uri] =
     id => {
-      Class.forName("org.postgresql.Driver")
-      val conn = {
-        val props = new java.util.Properties
-        props.put("user", "geoint")
-        props.put("password", "secret")
-        java.sql.DriverManager.getConnection("jdbc:postgresql://192.168.23.12/metadata", props)
-      }
-      val uriF: Future[Uri] =
+      val conn = Postgres.connect()
+      val uriF =
         for {
           servers <- (new com.radiantblue.deployer.PostgresTrack(conn)).deployments(id)
           if servers.nonEmpty
+          srv = servers(1 % servers.size)
         } yield {
-          val server = servers(1 % servers.size)
-          s"http://${server.address}:${server.port}"
+          s"http://${srv.address}:${srv.port}" : Uri
         }
-      uriF.onComplete(_ => conn.close())
+      uriF.onComplete { _ => conn.close() }
       uriF
     }
 
@@ -116,7 +111,7 @@ trait ProxyService extends HttpService with Proxy {
         import scala.util.{ Success, Failure }
         onComplete(lookup(id)) {
           case Success(url) => proxyToAuthority(url)
-          case Failure(ex) => complete(StatusCodes.NotFound, s"No dataset with locator $id is deployed")
+          case Failure(ex) => complete(StatusCodes.NotFound, s"No dataset with locator $id is deployed: $ex")
         }
       } ~
       ogcService {

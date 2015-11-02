@@ -101,7 +101,9 @@
       <CRS>CRS:84</CRS>
       <CRS>EPSG:4326</CRS>
       <CRS>EPSG:3857</CRS>
-      <CRS>EPSG:26713</CRS>
+      @for(crs <- layers.map(_._2.getCrsCode).distinct) {
+          <CRS>@crs</CRS>
+      }
       <EX_GeographicBoundingBox>
         <westBoundLongitude>-180.0</westBoundLongitude>
         <eastBoundLongitude>180.0</eastBoundLongitude>
@@ -115,6 +117,7 @@
             <Title>@md.getName</Title>
             <Abstract></Abstract>
             <CRS>@geo.getCrsCode</CRS>
+            <CRS>CRS:84</CRS>
             <EX_GeographicBoundingBox>
               <westBoundLongitude>@geo.getLatitudeLongitudeBoundingBox.getMinX</westBoundLongitude>
               <eastBoundLongitude>@geo.getLatitudeLongitudeBoundingBox.getMaxX</eastBoundLongitude>
@@ -122,7 +125,7 @@
               <northBoundLatitude>@geo.getLatitudeLongitudeBoundingBox.getMaxY</northBoundLatitude>
             </EX_GeographicBoundingBox>
             <BoundingBox CRS="CRS:84" minx="@geo.getLatitudeLongitudeBoundingBox.getMinX" miny="@geo.getLatitudeLongitudeBoundingBox.getMinY" maxx="@geo.getLatitudeLongitudeBoundingBox.getMaxX" maxy="@geo.getLatitudeLongitudeBoundingBox.getMaxY"/>
-            <BoundingBox CRS="@geo.getCrsCode" minx="@geo.getNativeBoundingBox.getMinX" miny="@geo.getNativeBoundingBox.getMinY" maxx="@geo.getNativeBoundingBox.getMaxX" maxy="@geo.getNativeBoundingBox.getMaxY"/>
+            <BoundingBox CRS="@geo.getCrsCode" minx="@geo.getNativeBoundingBox.getMinY" miny="@geo.getNativeBoundingBox.getMinX" maxx="@geo.getNativeBoundingBox.getMaxY" maxy="@geo.getNativeBoundingBox.getMaxX"/>
           </Layer>
       }
     </Layer>

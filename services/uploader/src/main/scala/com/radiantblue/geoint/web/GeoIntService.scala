@@ -111,6 +111,7 @@ trait GeoIntService extends HttpService with GeoIntJsonProtocol {
       rawPathPrefix(Slash) {
         (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
           complete {
+            println(uri)
             deployer.attemptDeploy(dataset).map { 
               case Deploying =>
                 HttpResponse(StatusCodes.Accepted, "Deploying")

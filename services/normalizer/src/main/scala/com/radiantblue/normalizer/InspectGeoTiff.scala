@@ -5,6 +5,29 @@ import com.radiantblue.geoint.Messages
 import scala.collection.JavaConverters._
 
 object InspectGeoTiff {
+  private def geoMetadata(
+    locator: String,
+    crs: org.opengis.referencing.crs.CoordinateReferenceSystem,
+    envelope: org.opengis.geometry.BoundingBox
+  ): Messages.GeoMetadata = {
+    val hasEpsgAuthority: org.opengis.metadata.Identifier => Boolean = 
+      _.getAuthority.getIdentifiers.asScala.exists(_.getCode == "EPSG")
+    val srid = crs.getIdentifiers.asScala.find(hasEpsgAuthority).map(_.getCode).get
+    val latLonEnvelope = {
+      import org.geotools.referencing.CRS
+      val wgs84 = CRS.decode("EPSG:4326")
+      val tx = CRS.findMathTransform(crs, wgs84)
+      CRS.transform(tx, envelope)
+    }
+
+    (Messages.GeoMetadata.newBuilder
+      .setLocator(locator)
+      .setCrsCode(srid)
+      .setNativeBoundingBox(toBoundingBox(envelope))
+      .setLatitudeLongitudeBoundingBox(toBoundingBox(latLonEnvelope))
+      .build())
+  }
+
   private def toBoundingBox(e: org.opengis.geometry.Envelope): Messages.GeoMetadata.BoundingBox = 
     (Messages.GeoMetadata.BoundingBox.newBuilder
       .setMinX(e.getMinimum(0))
@@ -28,27 +51,8 @@ object InspectGeoTiff {
           val coverage = reader.read(null)
           try {
             val envelope = coverage.getEnvelope2D
-            val hasEpsgAuthority: org.opengis.metadata.Identifier => Boolean = 
-              _.getAuthority.getIdentifiers.asScala.exists(_.getCode == "EPSG")
             val crs = coverage.getCoordinateReferenceSystem
-            val srid = crs.getIdentifiers.asScala.find(hasEpsgAuthority).map(_.getCode).get
-            val latLonEnvelope = 
-              try {
-                import org.geotools.referencing.CRS
-                val wgs84 = CRS.decode("EPSG:4326")
-                val tx = CRS.findMathTransform(crs, wgs84)
-                Some(CRS.transform(tx, envelope))
-              } catch {
-                case (_: org.opengis.referencing.FactoryException) | (_: org.opengis.referencing.operation.TransformException) =>
-                  None
-              }
-
-            (Messages.GeoMetadata.newBuilder
-              .setLocator(locator)
-              .setCrsCode(s"EPSG:$srid")
-              .setNativeBoundingBox(toBoundingBox(envelope))
-              .setLatitudeLongitudeBoundingBox(latLonEnvelope.map(toBoundingBox).orNull)
-              .build())
+            geoMetadata(locator, crs, envelope)
           } finally {
             coverage.dispose(true)
           }

@@ -14,6 +14,7 @@ libraryDependencies ++= {
     "org.slf4j" % "slf4j-simple" % "1.6.6",
     "org.apache.kafka" % "kafka-clients" % "0.8.2.2",
     "org.postgresql" % "postgresql" % "9.4-1203-jdbc42",
+    "org.geotools" % "gt-shapefile" % geotoolsV,
     "org.geotools" % "gt-geotiff" % geotoolsV,
     "org.geotools" % "gt-referencing" % geotoolsV,
     "org.geotools" % "gt-epsg-wkt" % geotoolsV
@@ -21,7 +22,8 @@ libraryDependencies ++= {
 }
 
 assemblyMergeStrategy in assembly := {
-  case PathList("META-INF", "registryFile.jai" | "registryFile.jaiext")      => MergeStrategy.concat
+  case PathList("META-INF", "registryFile.jai" | "registryFile.jaiext") =>
+    MergeStrategy.concat
   case x =>
     val oldStrategy = (assemblyMergeStrategy in assembly).value
     oldStrategy(x)

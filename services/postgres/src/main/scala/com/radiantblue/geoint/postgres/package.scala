@@ -210,7 +210,6 @@ package object postgres {
       prepareWithGeneratedKeys(sql) { ps =>
         ps.setString(1, locator)
         ps.setString(2, server)
-        ps.executeUpdate()
         iterateGeneratedKeys(ps)(rs => (server, rs.getLong(1))).head 
       }
     }

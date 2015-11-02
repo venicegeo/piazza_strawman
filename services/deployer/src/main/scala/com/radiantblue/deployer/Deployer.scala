@@ -221,7 +221,6 @@ sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionCont
       (Server(server, "8081", "/var/lib/geoserver_data/geoserver1/data"), token)
     }
 
-
   def deploymentSucceeded(id: Long): Future[Unit] = 
     Future(conn.completeDeployment(id))
 
@@ -264,10 +263,10 @@ sealed case class Deploy[D, S, K]
         for {
           (metadata, geometadata) <- metadataStore.lookup(locator)
           resource <- dataStore.lookup(locator)
-          (server, deploymentKey) <- track.deploymentStarted(locator)
+          (server, token) <- track.deploymentStarted(locator)
           _ <- provision.provision(resource, server)
           _ <- publish.publish(metadata, geometadata, server)
-          _ <- track.deploymentSucceeded(deploymentKey)
+          _ <- track.deploymentSucceeded(token)
         } yield Deployed(server)
     }
 }
