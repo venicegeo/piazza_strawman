@@ -1,6 +1,6 @@
 package com.radiantblue.normalizer
 
-import com.radiantblue.geoint.Messages
+import com.radiantblue.piazza.Messages
 
 import scala.collection.JavaConverters._
 
@@ -36,32 +36,36 @@ object InspectZippedShapefile {
       .setMaxY(e.getMaximum(1))
       .build())
 
-  def main(args: Array[String]): Unit = {
-    val file = new java.io.File(args.head)
-    val zip = new java.util.zip.ZipFile(file)
-    val workDir = 
+  def inspect(locator: String, file: java.io.File): Option[Messages.GeoMetadata] = {
+    try {
+      val zip = new java.util.zip.ZipFile(file)
+      val workDir = 
+        try {
+          val names = 
+            (for (e <- zip.entries.asScala) yield e.getName).to[Vector]
+          val basenames = names.map(_.replaceFirst("\\..*$", ""))
+          require(basenames.distinct.size == 1)
+          require(names.exists(_.toLowerCase endsWith ".shp"))
+
+          val workDir = java.nio.file.Files.createTempDirectory("unpack-zipped-shapefile")
+          for (e <- zip.entries.asScala) {
+            val path = workDir.resolve(e.getName)
+            val stream = zip.getInputStream(e)
+            try java.nio.file.Files.copy(stream, path)
+            finally stream.close()
+          }
+          workDir
+        } finally zip.close()
+
+      val params = Map[String, java.io.Serializable]("url" -> workDir.toUri.toString)
+      val storeFactory = new org.geotools.data.shapefile.ShapefileDataStoreFactory
+      val store = storeFactory.createDataStore(params.asJava)
       try {
-        val names = 
-          (for (e <- zip.entries.asScala) yield e.getName).to[Vector]
-        val basenames = names.map(_.replaceFirst("\\..*$", ""))
-        require(basenames.distinct.size == 1)
-        require(names.exists(_.toLowerCase endsWith ".shp"))
-
-        val workDir = java.nio.file.Files.createTempDirectory("unpack-zipped-shapefile")
-        for (e <- zip.entries.asScala) {
-          val path = workDir.resolve(e.getName)
-          val stream = zip.getInputStream(e)
-          try java.nio.file.Files.copy(stream, path)
-          finally stream.close()
-        }
-        workDir
-      } finally zip.close()
-    println(s"Unpacked to $workDir")
-
-    val params = Map[String, java.io.Serializable]("url" -> workDir.toUri.toString)
-    val storeFactory = new org.geotools.data.shapefile.ShapefileDataStoreFactory
-    val store = storeFactory.createDataStore(params.asJava)
-    val source = store.getFeatureSource(store.getNames.asScala.head)
-    println(geoMetadata("locator", source.getSchema.getCoordinateReferenceSystem, source.getBounds))
+        val source = store.getFeatureSource(store.getNames.asScala.head)
+        Some(geoMetadata("locator", source.getSchema.getCoordinateReferenceSystem, source.getBounds))
+      } finally store.dispose()
+    } catch {
+      case scala.util.control.NonFatal(_) => None
+    }
   }
 }
