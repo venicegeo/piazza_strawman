@@ -1,15 +1,15 @@
-package com.radiantblue.geoint.postgres
+package com.radiantblue.piazza.postgres
 
 import scala.collection.JavaConverters._
 
 object Postgres {
   lazy val config = com.typesafe.config.ConfigFactory.load()
 
-  def uri: String = config.getString("geoint.postgres.uri")
+  def uri: String = config.getString("piazza.postgres.uri")
   def properties: java.util.Properties = {
     val props = new java.util.Properties()
     for {
-      entry <- config.getConfig("geoint.postgres.properties").entrySet.asScala
+      entry <- config.getConfig("piazza.postgres.properties").entrySet.asScala
       if entry.getValue.valueType == com.typesafe.config.ConfigValueType.STRING
     } props.put(entry.getKey, entry.getValue.unwrapped)
     props

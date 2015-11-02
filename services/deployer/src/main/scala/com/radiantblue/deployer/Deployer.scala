@@ -12,8 +12,8 @@ import spray.client.pipelining._
 import spray.http._, HttpMethods._
 import spray.httpx.marshalling.Marshaller
 
-import com.radiantblue.geoint.Messages
-import com.radiantblue.geoint.postgres._
+import com.radiantblue.piazza.Messages
+import com.radiantblue.piazza.postgres._
 
 sealed case class Server(address: String, port: String, localFilePath: String)
 
@@ -58,7 +58,7 @@ sealed class FileSystemDatasetStorage(prefix: String = "file:///tmp/")(implicit 
   def store(body: BodyPart): Future[String] =
     Future {
       val buffs = body.entity.data.toByteString.asByteBuffers
-      val path = Files.createTempFile(prefixPath, "geoint", "upload")
+      val path = Files.createTempFile(prefixPath, "piazza", "upload")
       val file = Files.newByteChannel(path, java.nio.file.StandardOpenOption.WRITE)
       try buffs.foreach(file.write(_))
       finally file.close()
@@ -124,9 +124,9 @@ sealed class GeoServerPublish
   def publish(md: Messages.Metadata, geo: Messages.GeoMetadata, server: Server): Future[Unit] = {
     val id = md.getLocator
     val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
-    val deleteUri = (s"workspaces/geoint/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
-    val storeUri = (s"workspaces/geoint/coveragestores": Uri) resolvedAgainst serverUri
-    val layerUri = (s"workspaces/geoint/coveragestores/${id}/coverages": Uri) resolvedAgainst serverUri
+    val deleteUri = (s"workspaces/piazza/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
+    val storeUri = (s"workspaces/piazza/coveragestores": Uri) resolvedAgainst serverUri
+    val layerUri = (s"workspaces/piazza/coveragestores/${id}/coverages": Uri) resolvedAgainst serverUri
     for {
       deleteR <- pipeline(Delete(deleteUri))
       storeR <- pipeline(Post(storeUri, 
@@ -150,7 +150,7 @@ sealed class GeoServerPublish
       <type>GeoTIFF</type>
       <enabled>true</enabled>
       <workspace>
-        <name>geoint</name>
+        <name>piazza</name>
       </workspace>
       <url>file:data/{file}</url>
     </coverageStore>
@@ -160,7 +160,7 @@ sealed class GeoServerPublish
       <name>{nativeName}</name>
       <nativeName>{nativeName}</nativeName>
       <namespace>
-        <name>geoint</name>
+        <name>piazza</name>
       </namespace>
       <title>{name}</title>
       <description>Generated from GeoTIFF</description>
@@ -283,13 +283,13 @@ object Deployer {
     val config = com.typesafe.config.ConfigFactory.load()
 
     val provisioner = {
-      val geoserver = config.getConfig("geoint.geoserver")
+      val geoserver = config.getConfig("piazza.geoserver")
       val sshUser = geoserver.getString("ssh.user")
       val sshKey = geoserver.getString("ssh.key")
       new OpenSSHProvision(sshUser, java.nio.file.Paths.get(sshKey))
     }
     val publisher = {
-      val geoserver = config.getConfig("geoint.geoserver")
+      val geoserver = config.getConfig("piazza.geoserver")
       val restUser = geoserver.getString("rest.user")
       val restPassword = geoserver.getString("rest.password")
       new GeoServerPublish(restUser, restPassword)

@@ -1,8 +1,8 @@
-package com.radiantblue.geoint.web
+package com.radiantblue.piazza.web
 
-import com.radiantblue.geoint.Messages
+import com.radiantblue.piazza.Messages
 import com.radiantblue.deployer._
-import com.radiantblue.geoint.postgres._
+import com.radiantblue.piazza.postgres._
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
@@ -30,27 +30,27 @@ class Attempt[T](attempt: => T) {
   def optional: Option[T] = result
 }
 
-class GeoIntServiceActor extends Actor with GeoIntService {
+class PiazzaServiceActor extends Actor with PiazzaService {
   def actorSystem = context.system
   def futureContext = context.dispatcher
   def actorRefFactory = context
-  def receive = runRoute(geointRoute)
+  def receive = runRoute(piazzaRoute)
 
   def kafkaProducer: kafka.javaapi.producer.Producer[String, Array[Byte]] = attemptKafka.get
   def jdbcConnection: java.sql.Connection = attemptJdbc.get
 
   private val attemptKafka = new Attempt({
-    com.radiantblue.geoint.kafka.Kafka.producer[String, Array[Byte]]()
+    com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
   })
 
   private val attemptJdbc = new Attempt({
-    com.radiantblue.geoint.postgres.Postgres.connect()
+    com.radiantblue.piazza.postgres.Postgres.connect()
   })
 
   // TODO: Hook actor shutdown to close connections using attempt.optional.foreach { _.close }
 }
 
-trait GeoIntService extends HttpService with GeoIntJsonProtocol {
+trait PiazzaService extends HttpService with PiazzaJsonProtocol {
   implicit def actorSystem: ActorSystem
   implicit def futureContext: ExecutionContext
 
@@ -60,14 +60,14 @@ trait GeoIntService extends HttpService with GeoIntJsonProtocol {
 
   private val frontendRoute = 
     path("") {
-      getFromResource("com/radiantblue/geoint/web/index.html")
+      getFromResource("com/radiantblue/piazza/web/index.html")
     } ~
     path("index.html") {
       complete(HttpResponse(
         status = StatusCodes.MovedPermanently,
         headers = List(HttpHeaders.Location("/"))))
     } ~
-    getFromResourceDirectory("com/radiantblue/geoint/web")
+    getFromResourceDirectory("com/radiantblue/piazza/web")
 
   private val datasetsApi = 
     get {
@@ -144,5 +144,5 @@ trait GeoIntService extends HttpService with GeoIntJsonProtocol {
     kafkaProducer.send(message)
   }
 
-  val geointRoute = pathPrefix("api")(apiRoute) ~ frontendRoute
+  val piazzaRoute = pathPrefix("api")(apiRoute) ~ frontendRoute
 }

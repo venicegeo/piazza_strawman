@@ -1,6 +1,6 @@
-package geoint;
+package piazza;
 
-option java_package = "com.radiantblue.geoint";
+option java_package = "com.radiantblue.piazza";
 option java_outer_classname = "Messages";
 
 message Upload {

@@ -1,6 +1,6 @@
-package com.radiantblue.geoint
+package com.radiantblue.piazza
 
-import com.radiantblue.geoint.Messages._
+import com.radiantblue.piazza.Messages._
 import spray.json._
 
 package object postgres {

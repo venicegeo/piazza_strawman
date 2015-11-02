@@ -12,8 +12,8 @@
       - normalizer
       - deployer
   tasks:
-      - script: deploy_kafka_queues.sh creates=/opt/kafka/deployed_geoint_queues
-      - script: deploy_storm_topologies.sh creates=/opt/storm/deployed_geoint_topologies
+      - script: deploy_kafka_queues.sh creates=/opt/kafka/deployed_piazza_queues
+      - script: deploy_storm_topologies.sh creates=/opt/storm/deployed_piazza_topologies
 - hosts: geoserver
   sudo: yes
   roles:

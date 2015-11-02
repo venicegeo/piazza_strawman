@@ -5,7 +5,7 @@ package com.radiantblue.normalizer
  * Common setup code for Kafka/Storm connectors.
  */
 object Kafka {
-  import com.radiantblue.geoint.kafka.{ Kafka => Config }
+  import com.radiantblue.piazza.kafka.{ Kafka => Config }
   /**
    * Create a Spout that will read and emit all messages from a Kafka topic
    * using the provided Scheme to produce Storm tuples.

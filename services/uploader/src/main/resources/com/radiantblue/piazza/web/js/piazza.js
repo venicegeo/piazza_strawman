@@ -1,10 +1,10 @@
 $(function() {
-    $('#geointnav a.search').click(function (e) {
+    $('#piazzanav a.search').click(function (e) {
         e.preventDefault();
         $(this).tab('search')
     });
 
-    $('#geointnav a.upload').click(function (e) {
+    $('#piazzanav a.upload').click(function (e) {
         e.preventDefault();
         $(this).tab('upload')
     });

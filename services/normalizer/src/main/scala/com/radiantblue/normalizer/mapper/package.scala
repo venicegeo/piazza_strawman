@@ -1,6 +1,6 @@
 package com.radiantblue.normalizer.mapper
 
-import com.radiantblue.geoint.Messages
+import com.radiantblue.piazza.Messages
 
 object MetadataTupleMapper extends storm.kafka.bolt.mapper.TupleToKafkaMapper[String, Array[Byte]] {
   def getKeyFromTuple(tuple: backtype.storm.tuple.Tuple): String = null
@@ -47,7 +47,7 @@ object MetadataScheme extends backtype.storm.spout.Scheme {
 
 object UploadScheme extends backtype.storm.spout.Scheme {
   def deserialize(bytes: Array[Byte]): java.util.List[AnyRef] =
-    java.util.Arrays.asList(com.radiantblue.geoint.Messages.Upload.parseFrom(bytes))
+    java.util.Arrays.asList(Messages.Upload.parseFrom(bytes))
   def getOutputFields(): backtype.storm.tuple.Fields =
     new backtype.storm.tuple.Fields("upload")
 }

@@ -7,5 +7,5 @@ bin/storm jar /opt/normalizer/normalizer-assembly-0.1-SNAPSHOT.jar com.radiantbl
 bin/storm activate ExtractMetadata
 bin/storm activate ExtractGeoTiffMetadata
 bin/storm activate PersistMetadata
-touch deployed_geoint_topologies
+touch deployed_piazza_topologies
 popd

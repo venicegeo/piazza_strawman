@@ -1,6 +1,6 @@
 package com.radiantblue.normalizer
 
-import com.radiantblue.geoint.Messages
+import com.radiantblue.piazza.Messages
 
 import scala.collection.JavaConverters._
 

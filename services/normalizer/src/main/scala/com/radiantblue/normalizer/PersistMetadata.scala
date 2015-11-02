@@ -2,8 +2,8 @@ package com.radiantblue.normalizer
 
 import scala.collection.JavaConverters._
 import com.radiantblue.normalizer.mapper._
-import com.radiantblue.geoint.Messages
-import com.radiantblue.geoint.postgres._
+import com.radiantblue.piazza.Messages
+import com.radiantblue.piazza.postgres._
 
 object PersistMetadata {
   private class PersistBolt extends backtype.storm.topology.base.BaseRichBolt {

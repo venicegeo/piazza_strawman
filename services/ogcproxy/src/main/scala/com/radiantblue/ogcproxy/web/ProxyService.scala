@@ -1,6 +1,6 @@
 package com.radiantblue.ogcproxy.web
 
-import com.radiantblue.geoint.postgres._
+import com.radiantblue.piazza.postgres._
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
@@ -107,7 +107,7 @@ trait ProxyService extends HttpService with Proxy {
   def proxyRoute: Route = 
     pathPrefix("geoserver") { 
       datasetId { layer =>
-        val id = layer.replaceFirst("^geoint:", "")
+        val id = layer.replaceFirst("^piazza:", "")
         import scala.util.{ Success, Failure }
         onComplete(lookup(id)) {
           case Success(url) => proxyToAuthority(url)

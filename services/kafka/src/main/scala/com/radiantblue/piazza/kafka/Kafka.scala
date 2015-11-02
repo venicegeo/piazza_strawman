@@ -1,4 +1,4 @@
-package com.radiantblue.geoint.kafka
+package com.radiantblue.piazza.kafka
 
 import scala.collection.JavaConverters._
 
@@ -6,10 +6,10 @@ object Kafka {
   lazy val config = com.typesafe.config.ConfigFactory.load()
 
   def zookeepers: Vector[String] = 
-    config.getStringList("geoint.kafka.zookeepers").asScala.to[Vector]
+    config.getStringList("piazza.kafka.zookeepers").asScala.to[Vector]
 
   def brokers: Vector[String] =
-    config.getStringList("geoint.kafka.brokers").asScala.to[Vector]
+    config.getStringList("piazza.kafka.brokers").asScala.to[Vector]
 
   def producer[K, T](extraOpts: (String, String)*): kafka.javaapi.producer.Producer[K, T] = {
     val props = new java.util.Properties

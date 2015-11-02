@@ -1,7 +1,7 @@
 package com.radiantblue.normalizer
 
 import com.radiantblue.normalizer.mapper._
-import com.radiantblue.geoint.Messages
+import com.radiantblue.piazza.Messages
 
 object ExtractMetadata {
   private class MetadataBolt extends backtype.storm.topology.base.BaseRichBolt {

@@ -14,4 +14,4 @@ libraryDependencies ++= {
   )
 }
 
-mainClass in Compile := Some("com.radiantblue.geoint.web.Boot")
+mainClass in Compile := Some("com.radiantblue.piazza.web.Boot")

@@ -1,6 +1,6 @@
-package com.radiantblue.geoint.uploader
+package com.radiantblue.piazza.uploader
 
-import com.radiantblue.geoint.Messages
+import com.radiantblue.piazza.Messages
 
 object Uploader {
   def main(args: Array[String]): Unit = {
