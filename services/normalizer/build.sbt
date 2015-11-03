@@ -17,7 +17,7 @@ libraryDependencies ++= {
     "org.geotools" % "gt-shapefile" % geotoolsV,
     "org.geotools" % "gt-geotiff" % geotoolsV,
     "org.geotools" % "gt-referencing" % geotoolsV,
-    "org.geotools" % "gt-epsg-wkt" % geotoolsV
+    "org.geotools" % "gt-epsg-hsql" % geotoolsV
   )
 }
 

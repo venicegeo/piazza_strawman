@@ -5,8 +5,8 @@ import com.radiantblue.normalizer.mapper._
 import com.radiantblue.piazza.Messages
 import com.radiantblue.piazza.postgres._
 
-object PersistMetadata {
-  private class PersistBolt extends backtype.storm.topology.base.BaseRichBolt {
+object Persist {
+  val bolt: backtype.storm.topology.IRichBolt = new backtype.storm.topology.base.BaseRichBolt {
     var _collector: backtype.storm.task.OutputCollector = _
 
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
@@ -34,7 +34,9 @@ object PersistMetadata {
       // no output
     }
   }
+}
 
+object PersistTopology {
   def main(args: Array[String]): Unit = {
     java.lang.Class.forName("org.postgresql.Driver")
       
@@ -42,10 +44,9 @@ object PersistMetadata {
 
     val builder = new backtype.storm.topology.TopologyBuilder
     builder.setSpout("metadata", kafkaSpout)
-    builder.setBolt("persister", new PersistBolt).shuffleGrouping("metadata")
+    builder.setBolt("persister", Persist.bolt).shuffleGrouping("metadata")
 
     val conf = Kafka.topologyConfig
-
-    backtype.storm.StormSubmitter.submitTopology("PersistMetadata", conf, builder.createTopology)
+    backtype.storm.StormSubmitter.submitTopology("Persist", conf, builder.createTopology)
   }
 }

@@ -46,12 +46,13 @@ $(function() {
              });
              $("#search-results").empty().append(table);
 
-             var bboxes = (data.results
+             var bboxLayers = (data.results
                  .filter(function(row) { return row.latlonBbox != null; })
-                 .map(function(row) { return L.rectangle(L.geoJson(row.latlonBbox).getBounds()); })
+                 .map(function(row) { return L.geoJson(row.latlonBbox); })
              );
-             var overallBounds = bboxes.reduce(function(acc, el) { return acc.extend(el); });
-             var newLyr = L.layerGroup(bboxes);
+             var bboxes = bboxLayers.map(function(lyr) { return lyr.getBounds() });
+             var overallBounds = bboxes.reduce(function(acc, el) { return acc.extend(el) });
+             var newLyr = L.layerGroup(bboxLayers);
              map.addLayer(newLyr);
              lyr && map.removeLayer(lyr);
              lyr = newLyr;

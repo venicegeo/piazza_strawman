@@ -1,15 +1,14 @@
 package com.radiantblue.normalizer
 
-import com.radiantblue.normalizer.mapper._
-import com.radiantblue.piazza.Messages
+import com.radiantblue.piazza.Messages._
 
-object ExtractMetadata {
-  private class MetadataBolt extends backtype.storm.topology.base.BaseRichBolt {
-    val logger = org.slf4j.LoggerFactory.getLogger(classOf[MetadataBolt])
+object Inspect {
+  val bolt: backtype.storm.topology.IRichBolt  = new backtype.storm.topology.base.BaseRichBolt {
+    val logger = org.slf4j.LoggerFactory.getLogger(Inspect.getClass)
     var _collector: backtype.storm.task.OutputCollector = _
 
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
-      val upload = tuple.getValue(0).asInstanceOf[Messages.Upload]
+      val upload = tuple.getValue(0).asInstanceOf[Upload]
       logger.info("Upload {}", upload)
       import scala.concurrent.ExecutionContext.Implicits.global
       val pathF = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.getLocator)
@@ -36,7 +35,13 @@ object ExtractMetadata {
       }
       logger.info("checksum {}", checksum.map(b => f"$b%02X").mkString)
 
-      _collector.emit(tuple, java.util.Arrays.asList[AnyRef](upload.getName, upload.getLocator, checksum, size))
+      val message = Metadata.newBuilder
+        .setName(upload.getName)
+        .setLocator(upload.getLocator)
+        .setChecksum(com.google.protobuf.ByteString.copyFrom(checksum))
+        .setSize(size)
+        .build
+      _collector.emit(tuple, java.util.Arrays.asList[AnyRef](message.toByteArray))
       logger.info("emitted")
       _collector.ack(tuple)
     }
@@ -46,21 +51,7 @@ object ExtractMetadata {
     }
 
     def declareOutputFields(declarer: backtype.storm.topology.OutputFieldsDeclarer): Unit = {
-      declarer.declare(new backtype.storm.tuple.Fields("name", "locator", "checksum", "size"))
+      declarer.declare(new backtype.storm.tuple.Fields("message"))
     }
-  }
-
-  def main(args: Array[String]): Unit = {
-    val kafkaSpout = Kafka.spoutForTopic("uploads", UploadScheme) 
-    val kafkaBolt = Kafka.boltForTopic("metadata", MetadataTupleMapper)
-
-    val builder = new backtype.storm.topology.TopologyBuilder
-    builder.setSpout("uploads", kafkaSpout)
-    builder.setBolt("metadata", new MetadataBolt).shuffleGrouping("uploads")
-    builder.setBolt("publish", kafkaBolt).shuffleGrouping("metadata")
-
-    val conf = Kafka.topologyConfig
-
-    backtype.storm.StormSubmitter.submitTopology("ExtractMetadata", conf, builder.createTopology)
   }
 }
