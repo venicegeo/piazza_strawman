@@ -55,6 +55,7 @@ object InspectGeoTiff {
       .setCrsCode(srid)
       .setNativeBoundingBox(toBoundingBox(envelope))
       .setLatitudeLongitudeBoundingBox(toBoundingBox(latLonEnvelope))
+      .setNativeFormat("geotiff")
       .build())
   }
 

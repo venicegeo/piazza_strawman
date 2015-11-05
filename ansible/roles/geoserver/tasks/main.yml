@@ -10,5 +10,6 @@
 - file: name=/var/lib/geoserver_data/ state=directory
 - copy: src=minimal_geoserver_data/ dest=/var/lib/geoserver_data/{{ name }} owner=tomcat group=tomcat
 - file: name=/var/lib/geoserver_data/{{ name }}/data owner=tomcat group=tomcat mode=1774 state=directory
+- template: src=datastore.xml.j2 dest=/var/lib/geoserver_data/{{ name }}/workspaces/piazza/postgis/datastore.xml
 - template: src=context.xml.j2 dest=/var/lib/tomcats/{{ name }}/conf/Catalina/localhost/geoserver.xml
 - service: name={{ name }} enabled=yes state=restarted

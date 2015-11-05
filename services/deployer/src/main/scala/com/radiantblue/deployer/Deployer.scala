@@ -12,7 +12,7 @@ import spray.client.pipelining._
 import spray.http._, HttpMethods._
 import spray.httpx.marshalling.Marshaller
 
-import com.radiantblue.piazza.Messages
+import com.radiantblue.piazza.Messages._
 import com.radiantblue.piazza.postgres._
 
 sealed case class Server(address: String, port: String, localFilePath: String)
@@ -23,13 +23,13 @@ case class Deployed[S](server: S) extends DeployStatus[S]
 object Undeployable extends DeployStatus[Nothing]
 
 trait MetadataStore {
-  def lookup(locator: String): Future[(Messages.Metadata, Messages.GeoMetadata)]
+  def lookup(locator: String): Future[(Metadata, GeoMetadata)]
 }
 
 class PostgresMetadataStore(conn: java.sql.Connection)(implicit ec: ExecutionContext)
   extends MetadataStore
 {
-  def lookup(locator: String): Future[(Messages.Metadata, Messages.GeoMetadata)] =
+  def lookup(locator: String): Future[(Metadata, GeoMetadata)] =
     Future(conn.datasetWithMetadata(locator))
 }
 
@@ -67,46 +67,19 @@ sealed class FileSystemDatasetStorage(prefix: String = "file:///tmp/")(implicit 
 }
 
 /**
- * The Provision trait encapsulates strategies for retrieving datasets from
- * long-term storage and preparing them for publishing via, for example, OGC
- * services in GeoServer.
- */
-trait Provision[T, S] {
-  def provision(dataset: T, server: S): Future[Unit]
-  // unprovision??
-}
-
-sealed class OpenSSHProvision
-  (sshUser: String, sshKey: java.nio.file.Path)
-  (implicit ec: ExecutionContext)
-  extends Provision[java.nio.file.Path, Server]
-{ 
-  import scala.sys.process._
-  def provision(dataset: java.nio.file.Path, server: Server): Future[Unit] = Future {
-    val key = sshKey.toAbsolutePath.toString
-    val command = Vector(
-      "rsync",
-      "-e", s"ssh -oStrictHostKeyChecking=no -q -i$key",
-      "--perms",
-      "--chmod=u+rw,g+rw,o+r",
-      dataset.toAbsolutePath.toString,
-      s"$sshUser@${server.address}:${server.localFilePath}")
-    if (command.! != 0) throw new Exception("Failed with non-zero exit status")
-  }
-}
-
-/**
  * The Publish trait encapsulates strategies for exposing deployed resources
  * via services such as OGC WMS, WFS, and WCS.
  */
-trait Publish[S] {
-  def publish(metadata: Messages.Metadata, geo: Messages.GeoMetadata, server: S): Future[Unit]
+trait Publish[R,S] {
+  def publish(metadata: Metadata, geo: GeoMetadata, resource: R, server: S): Future[Unit]
 }
 
 sealed class GeoServerPublish
-  (user: String, password: String)
+  (sshUser: String, sshKey: java.nio.file.Path,
+   geoserverUser: String, geoserverPassword: String,
+   pgUser: String, pgPassword: String, pgHost: String, pgPort: Int, pgDatabase: String)
   (implicit system: ActorSystem, ec: ExecutionContext) 
-  extends Publish[Server]
+  extends Publish[java.nio.file.Path, Server]
 {
   private implicit val timeout: Timeout = 5.seconds
 
@@ -117,89 +90,199 @@ sealed class GeoServerPublish
     Marshaller.delegate[scala.xml.NodeSeq, String](MediaTypes.`application/xml`)(_.toString)
 
   private val pipeline = (
-    addCredentials(BasicHttpCredentials(user: String, password: String))
+    addCredentials(BasicHttpCredentials(geoserverUser: String, geoserverPassword: String))
     ~> sendReceive
   )
 
-  def publish(md: Messages.Metadata, geo: Messages.GeoMetadata, server: Server): Future[Unit] = {
-    val id = md.getLocator
-    val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
-    val deleteUri = (s"workspaces/piazza/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
-    val storeUri = (s"workspaces/piazza/coveragestores": Uri) resolvedAgainst serverUri
-    val layerUri = (s"workspaces/piazza/coveragestores/${id}/coverages": Uri) resolvedAgainst serverUri
-    for {
-      deleteR <- pipeline(Delete(deleteUri))
-      storeR <- pipeline(Post(storeUri, 
-        storeConfig(md.getLocator, md.getName, md.getLocator)))
-      _ <- Future { require(storeR.status.isSuccess, "Store creation failed") }
-      layerR <- pipeline(Post(layerUri,
-        layerConfig(
-          md.getName,
-          md.getLocator,
-          geo.getNativeBoundingBox,
-          geo.getLatitudeLongitudeBoundingBox,
-          geo.getCrsCode)))
-      _ <- Future { require(layerR.status.isSuccess, "Layer creation failed") }
-    } yield ()
+  def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = {
+    val datatype: Publish[java.nio.file.Path, Server] =
+      geo.getNativeFormat match {
+        case "geotiff" => Raster
+        case "zipped-shapefile" => Feature
+      }
+    datatype.publish(md, geo, resource, server)
   }
 
-  private def storeConfig(name: String, title: String, file: String): scala.xml.NodeSeq =
-    <coverageStore>
-      <name>{name}</name>
-      <description>{name}</description>
-      <type>GeoTIFF</type>
-      <enabled>true</enabled>
-      <workspace>
-        <name>piazza</name>
-      </workspace>
-      <url>file:data/{file}</url>
-    </coverageStore>
+  private object Raster extends Publish[java.nio.file.Path, Server] {
+    def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = 
+      for {
+        _ <- copyFile(resource, server)
+        _ <- configure(md, geo, server)
+      } yield ()
 
-  private def layerConfig(name: String, nativeName: String, nativeBbox: Messages.GeoMetadata.BoundingBox, latlonBbox: Messages.GeoMetadata.BoundingBox, srid: String): scala.xml.NodeSeq =
-    <coverage>
-      <name>{nativeName}</name>
-      <nativeName>{nativeName}</nativeName>
-      <namespace>
-        <name>piazza</name>
-      </namespace>
-      <title>{name}</title>
-      <description>Generated from GeoTIFF</description>
-      <keywords>
-        <string>WCS</string>
-        <string>GeoTIFF</string>
-        <string>{name}</string>
-      </keywords>
-      <srs>{srid}</srs>
-      <nativeBoundingBox>
-        <minx>{nativeBbox.getMinX}</minx>
-        <maxx>{nativeBbox.getMaxX}</maxx>
-        <miny>{nativeBbox.getMinY}</miny>
-        <maxy>{nativeBbox.getMaxY}</maxy>
-      </nativeBoundingBox>
-      <latLonBoundingBox>
-        <minx>{latlonBbox.getMinX}</minx>
-        <maxx>{latlonBbox.getMaxX}</maxx>
-        <miny>{latlonBbox.getMinY}</miny>
-        <maxy>{latlonBbox.getMaxY}</maxy>
-      </latLonBoundingBox>
-      <projectionPolicy>REPROJECT_TO_DECLARED</projectionPolicy>
-      <enabled>true</enabled>
-      <metadata>
-        <entry key="dirName">sfdem_sfdem</entry>
-      </metadata>
-      <store class="coverageStore">
-        <name>sfdem</name>
-      </store>
-      <nativeFormat>GeoTIFF</nativeFormat>
-      <defaultInterpolationMethod>nearest neighbor</defaultInterpolationMethod>
-      <requestSRS>
-        <string>{srid}</string>
-      </requestSRS>
-      <responseSRS>
-        <string>{srid}</string>
-      </responseSRS>
-      <nativeCoverageName>{nativeName}</nativeCoverageName>
-    </coverage>
+    private def copyFile(resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
+      import scala.sys.process._
+      val key = sshKey.toAbsolutePath.toString
+      val command = Vector(
+        "rsync",
+        "-e", s"ssh -oStrictHostKeyChecking=no -q -i$key",
+        "--perms",
+        "--chmod=u+rw,g+rw,o+r",
+        resource.toAbsolutePath.toString,
+        s"$sshUser@${server.address}:${server.localFilePath}")
+      require(command.! == 0)
+    }
+
+    def configure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
+      val id = md.getLocator
+      val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
+      val deleteUri = (s"workspaces/piazza/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
+      val storeUri = ("workspaces/piazza/coveragestores": Uri) resolvedAgainst serverUri
+      val layerUri = (s"workspaces/piazza/coveragestores/${id}/coverages": Uri) resolvedAgainst serverUri
+      for {
+        deleteR <- pipeline(Delete(deleteUri))
+        storeR <- pipeline(Post(storeUri, 
+          storeConfig(md.getLocator, md.getName, md.getLocator)))
+        _ <- Future { require(storeR.status.isSuccess, "Store creation failed") }
+        layerR <- pipeline(Post(layerUri,
+          layerConfig(
+            md.getName,
+            md.getLocator,
+            geo.getNativeBoundingBox,
+            geo.getLatitudeLongitudeBoundingBox,
+            geo.getCrsCode)))
+        _ <- Future { require(layerR.status.isSuccess, "Layer creation failed") }
+      } yield ()
+    }
+
+    def storeConfig(name: String, title: String, file: String): scala.xml.NodeSeq =
+      <coverageStore>
+        <name>{name}</name>
+        <description>{name}</description>
+        <type>GeoTIFF</type>
+        <enabled>true</enabled>
+        <workspace>
+          <name>piazza</name>
+        </workspace>
+        <url>file:data/{file}</url>
+      </coverageStore>
+
+    def layerConfig(name: String, nativeName: String, nativeBbox: GeoMetadata.BoundingBox, latlonBbox: GeoMetadata.BoundingBox, srid: String): scala.xml.NodeSeq =
+      <coverage>
+        <name>{nativeName}</name>
+        <nativeName>{nativeName}</nativeName>
+        <namespace>
+          <name>piazza</name>
+        </namespace>
+        <title>{name}</title>
+        <description>Generated from GeoTIFF</description>
+        <keywords>
+          <string>WCS</string>
+          <string>GeoTIFF</string>
+          <string>{name}</string>
+        </keywords>
+        <srs>{srid}</srs>
+        <nativeBoundingBox>
+          <minx>{nativeBbox.getMinX}</minx>
+          <maxx>{nativeBbox.getMaxX}</maxx>
+          <miny>{nativeBbox.getMinY}</miny>
+          <maxy>{nativeBbox.getMaxY}</maxy>
+        </nativeBoundingBox>
+        <latLonBoundingBox>
+          <minx>{latlonBbox.getMinX}</minx>
+          <maxx>{latlonBbox.getMaxX}</maxx>
+          <miny>{latlonBbox.getMinY}</miny>
+          <maxy>{latlonBbox.getMaxY}</maxy>
+        </latLonBoundingBox>
+        <projectionPolicy>REPROJECT_TO_DECLARED</projectionPolicy>
+        <enabled>true</enabled>
+        <metadata>
+          <entry key="dirName">sfdem_sfdem</entry>
+        </metadata>
+        <store class="coverageStore">
+          <name>sfdem</name>
+        </store>
+        <nativeFormat>GeoTIFF</nativeFormat>
+        <defaultInterpolationMethod>nearest neighbor</defaultInterpolationMethod>
+        <requestSRS>
+          <string>{srid}</string>
+        </requestSRS>
+        <responseSRS>
+          <string>{srid}</string>
+        </responseSRS>
+        <nativeCoverageName>{nativeName}</nativeCoverageName>
+      </coverage>
+  }
+
+  private object Feature extends Publish[java.nio.file.Path, Server] {
+    def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] =
+      for {
+        _ <- copyTable(md, resource, server)
+        _ <- configure(md, geo, server)
+      } yield ()
+
+    def copyTable(md: Metadata, resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
+      import scala.collection.JavaConverters._
+      import scala.sys.process._
+      val workDir = java.nio.file.Files.createTempDirectory("unpack-zipped-shapefile")
+      val zip = new java.util.zip.ZipFile(resource.toFile)
+      val shp = zip.entries.asScala.map(_.getName).find(_.toLowerCase endsWith ".shp").get
+      val shpPath = workDir.resolve(shp)
+      for (e <- zip.entries.asScala) {
+        val path = workDir.resolve(e.getName)
+        val stream = zip.getInputStream(e)
+        try java.nio.file.Files.copy(stream, path)
+        finally stream.close()
+      }
+      val command = Vector(
+        "ogr2ogr",
+        "-f", "PostgreSQL",
+        "-overwrite",
+        "-nln", md.getLocator,
+        "-nlt", "PROMOTE_TO_MULTI",
+        s"PG:dbname=$pgDatabase user=$pgUser host=$pgHost port=$pgPort password=$pgPassword",
+        shpPath.toFile.getAbsolutePath)
+      require(command.! == 0)
+
+    }
+
+    def configure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
+      val id = md.getLocator
+      val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
+      val deleteUri = (s"workspaces/piazza/datastores/postgis/featuretypes/${id}?recurse=true": Uri) resolvedAgainst serverUri
+      val layerUri = (s"workspaces/piazza/datastores/postgis/featuretypes": Uri) resolvedAgainst serverUri
+      for {
+        deleteR <- pipeline(Delete(deleteUri))
+        layerR <- pipeline(Post(layerUri, layerConfig(md, geo)))
+        _ <- if (layerR.status.isSuccess)
+               Future.successful(())
+             else 
+               Future.failed(new Exception("Layer creation failed: " + layerR.entity.asString))
+      } yield ()
+    }
+
+    def layerConfig(md: Metadata, geo: GeoMetadata): scala.xml.NodeSeq =
+      <featureType>
+        <name>{md.getLocator}</name>
+        <nativeName>{md.getLocator}</nativeName>
+        <title>{md.getName}</title>
+        <keywords>
+          <string>features</string>
+          <string>{md.getName}</string>
+        </keywords>
+        <nativeCRS>{ geo.getCrsCode }</nativeCRS>
+        <srs>{ geo.getCrsCode }</srs>
+        <nativeBoundingBox>
+          <minx>{ geo.getNativeBoundingBox.getMinX }</minx>
+          <maxx>{ geo.getNativeBoundingBox.getMaxX }</maxx>
+          <miny>{ geo.getNativeBoundingBox.getMinY }</miny>
+          <maxy>{ geo.getNativeBoundingBox.getMaxX }</maxy>
+        </nativeBoundingBox>
+        <latLonBoundingBox>
+          <minx>{ geo.getLatitudeLongitudeBoundingBox.getMinX }</minx>
+          <maxx>{ geo.getLatitudeLongitudeBoundingBox.getMaxX }</maxx>
+          <miny>{ geo.getLatitudeLongitudeBoundingBox.getMinY }</miny>
+          <maxy>{ geo.getLatitudeLongitudeBoundingBox.getMaxX }</maxy>
+        </latLonBoundingBox>
+        <projectionPolicy>FORCE_DECLARED</projectionPolicy>
+        <enabled>true</enabled>
+        <maxFeatures>0</maxFeatures>
+        <numDecimals>0</numDecimals>
+        <overridingServiceSRS>false</overridingServiceSRS>
+        <skipNumberMatched>false</skipNumberMatched>
+        <circularArcPresent>false</circularArcPresent>
+      </featureType>
+  }
 }
 
 /**
@@ -251,8 +334,8 @@ sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionCont
 sealed case class Deploy[D, S, K]
   (metadataStore: MetadataStore,
    dataStore: DatasetStorage[D],
-   provision: Provision[D, S],
-   publish: Publish[S],
+   // provision: Provision[D, S],
+   publish: Publish[D, S],
    track: Track[S, K])
   (implicit ec: ExecutionContext)
 {
@@ -264,16 +347,43 @@ sealed case class Deploy[D, S, K]
           (metadata, geometadata) <- metadataStore.lookup(locator)
           resource <- dataStore.lookup(locator)
           (server, token) <- track.deploymentStarted(locator)
-          _ <- provision.provision(resource, server)
-          _ <- publish.publish(metadata, geometadata, server)
+          // _ <- provision.provision(metadata, geometadata, resource, server)
+          _ <- publish.publish(metadata, geometadata, resource, server)
           _ <- track.deploymentSucceeded(token)
         } yield Deployed(server)
     }
 }
 
 object Deployer {
+  def deployer(implicit system: ActorSystem, context: ExecutionContext) = {
+    val postgresConnection = Postgres.connect()
+    val config = com.typesafe.config.ConfigFactory.load()
+
+    val publisher = {
+      val gs = config.getConfig("piazza.geoserver")
+      val pg = config.getConfig("piazza.postgres")
+      val pgUri = new java.net.URI(new java.net.URI(pg.getString("uri")).getSchemeSpecificPart)
+
+      new GeoServerPublish(
+        sshUser = gs.getString("ssh.user"),
+        sshKey = java.nio.file.Paths.get(gs.getString("ssh.key")),
+        geoserverUser = gs.getString("rest.user"),
+        geoserverPassword = gs.getString("rest.password"),
+        pgUser = pg.getString("properties.user"),
+        pgPassword = pg.getString("properties.password"),
+        pgHost = pgUri.getHost,
+        pgPort = if (pgUri.getPort <= 0) 5432 else pgUri.getPort, 
+        pgDatabase = pgUri.getPath.drop("/".length))
+    }
+
+    Deploy(
+      new PostgresMetadataStore(postgresConnection),
+      new FileSystemDatasetStorage(),
+      publisher,
+      new PostgresTrack(postgresConnection))
+  }
+
   def main(args: Array[String]): Unit = {
-    Class.forName("org.postgresql.Driver")
     val locator = args(0)
 
     implicit val system: ActorSystem = ActorSystem("spray-client")
@@ -281,27 +391,6 @@ object Deployer {
 
     val postgresConnection = Postgres.connect()
     val config = com.typesafe.config.ConfigFactory.load()
-
-    val provisioner = {
-      val geoserver = config.getConfig("piazza.geoserver")
-      val sshUser = geoserver.getString("ssh.user")
-      val sshKey = geoserver.getString("ssh.key")
-      new OpenSSHProvision(sshUser, java.nio.file.Paths.get(sshKey))
-    }
-    val publisher = {
-      val geoserver = config.getConfig("piazza.geoserver")
-      val restUser = geoserver.getString("rest.user")
-      val restPassword = geoserver.getString("rest.password")
-      new GeoServerPublish(restUser, restPassword)
-    }
-
-    val deployer = 
-      Deploy(
-        new PostgresMetadataStore(postgresConnection),
-        new FileSystemDatasetStorage(),
-        provisioner,
-        publisher,
-        new PostgresTrack(postgresConnection))
 
     val printF = 
       for (result <- deployer.attemptDeploy(locator)) yield {

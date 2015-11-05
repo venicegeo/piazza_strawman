@@ -56,7 +56,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
 
   def kafkaProducer: kafka.javaapi.producer.Producer[String, Array[Byte]]
   def jdbcConnection: java.sql.Connection
-
+  def deployer = com.radiantblue.deployer.Deployer.deployer
 
   private val frontendRoute = 
     path("") {
@@ -111,7 +111,6 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
       rawPathPrefix(Slash) {
         (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
           complete {
-            println(uri)
             deployer.attemptDeploy(dataset).map { 
               case Deploying =>
                 HttpResponse(StatusCodes.Accepted, "Deploying")
@@ -125,14 +124,6 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
         }
       }
     }
-
-  def deployer = 
-    Deploy(
-      new PostgresMetadataStore(jdbcConnection),
-      new FileSystemDatasetStorage(),
-      new OpenSSHProvision("geoserver_files", java.nio.file.Paths.get("/opt/deployer/geoserver-files")),
-      new GeoServerPublish("admin", "geoserver"),
-      new PostgresTrack(jdbcConnection))
 
   private val apiRoute =
     pathPrefix("datasets") { datasetsApi } ~ 

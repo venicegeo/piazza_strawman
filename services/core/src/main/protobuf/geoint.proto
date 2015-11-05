@@ -20,6 +20,7 @@ message GeoMetadata {
     required string crsCode = 2;
     required BoundingBox nativeBoundingBox = 3;
     required BoundingBox latitudeLongitudeBoundingBox = 4;
+    required string nativeFormat = 5;
 
     message BoundingBox {
         required double minX = 1;

@@ -104,7 +104,8 @@ package object postgres {
           ST_XMin(gm.latlon_bounds),
           ST_XMax(gm.latlon_bounds),
           ST_YMin(gm.latlon_bounds),
-          ST_YMax(gm.latlon_bounds)
+          ST_YMax(gm.latlon_bounds),
+          gm.native_format
         FROM metadata m JOIN geometadata gm USING (locator) 
         WHERE locator = ?
         LIMIT 2
@@ -133,6 +134,7 @@ package object postgres {
               .setMinY(rs.getDouble(11))
               .setMaxY(rs.getDouble(12))
               .build())
+            .setNativeFormat(rs.getString(13))
             .build()
           (md, geo)
         }
@@ -158,7 +160,8 @@ package object postgres {
           ST_XMin(gm.latlon_bounds),
           ST_XMax(gm.latlon_bounds),
           ST_YMin(gm.latlon_bounds),
-          ST_YMax(gm.latlon_bounds)
+          ST_YMax(gm.latlon_bounds),
+          gm.native_format
         FROM metadata m 
           JOIN geometadata gm USING (locator)
           JOIN deployments d USING (locator)
@@ -189,6 +192,7 @@ package object postgres {
                 .setMinY(rs.getDouble(11))
                 .setMaxY(rs.getDouble(12))
                 .build())
+              .setNativeFormat(rs.getString(13))
               .build()
             (md, geo)
         })
@@ -257,11 +261,12 @@ package object postgres {
 
     def insertGeoMetadata(g: GeoMetadata): Unit = {
       val sql = ("""
-      INSERT INTO geometadata (locator, native_srid, native_bounds, latlon_bounds) VALUES ( 
+      INSERT INTO geometadata (locator, native_srid, native_bounds, latlon_bounds, native_format) VALUES ( 
         ?,
         ?, 
         ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?)),
-        ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?))
+        ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?)),
+        ?
       ) """)
       prepare(sql) { ps =>
         ps.setString(1, g.getLocator)
@@ -274,6 +279,7 @@ package object postgres {
         ps.setDouble(8, g.getLatitudeLongitudeBoundingBox.getMinY)
         ps.setDouble(9, g.getLatitudeLongitudeBoundingBox.getMaxX)
         ps.setDouble(10, g.getLatitudeLongitudeBoundingBox.getMaxY)
+        ps.setString(11, g.getNativeFormat)
         ps.executeUpdate()
       }
     }

@@ -1,4 +1,8 @@
+- shell: rpm -i http://fedora-epel.mirror.lstn.net/7/x86_64/e/epel-release-7-5.noarch.rpm
+  args:
+      creates: /etc/yum.repos.d/epel.repo
 - yum: name=rsync state=latest
+- yum: name=gdal state=latest
 - unarchive: src=deployer-0.1-SNAPSHOT.tgz dest=/opt/
 - file: path=/opt/deployer state=link src=/opt/deployer-0.1-SNAPSHOT
 - copy: src=geoserver-files dest=/opt/deployer-0.1-SNAPSHOT/ mode=0600

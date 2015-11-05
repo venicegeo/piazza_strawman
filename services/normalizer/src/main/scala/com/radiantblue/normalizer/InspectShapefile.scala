@@ -64,6 +64,7 @@ object InspectZippedShapefile {
       .setCrsCode(srid)
       .setNativeBoundingBox(toBoundingBox(envelope))
       .setLatitudeLongitudeBoundingBox(toBoundingBox(latLonEnvelope))
+      .setNativeFormat("zipped-shapefile")
       .build())
   }
 
