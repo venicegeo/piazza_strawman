@@ -14,7 +14,7 @@ object Persist {
       // land in Storm 0.10 and provide connection pooling in a Storm-friendly
       // way.  For now, just connect and disconnect for each tuple processed
       // (slow!)
-      val conn = Postgres.connect()
+      val conn = Postgres("piazza.metadata.postgres").connect()
       try {
         tuple.getValue(0) match {
           case metadata: Messages.Metadata => conn.insertMetadata(metadata)

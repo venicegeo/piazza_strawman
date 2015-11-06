@@ -11,13 +11,21 @@ object Kafka {
   def brokers: Vector[String] =
     config.getStringList("piazza.kafka.brokers").asScala.to[Vector]
 
-  def producer[K, T](extraOpts: (String, String)*): kafka.javaapi.producer.Producer[K, T] = {
+  def producer[K, T](extraOpts: (String, String)*): kafka.producer.Producer[K, T] = {
     val props = new java.util.Properties
     props.put("zk.connect", zookeepers.mkString(","))
     props.put("metadata.broker.list", brokers.mkString(","))
     props.put("serializer.class", "kafka.serializer.DefaultEncoder")
     extraOpts.foreach { case (k, v) => props.put(k, v) }
     val producerConfig = new kafka.producer.ProducerConfig(props)
-    new kafka.javaapi.producer.Producer[K, T](producerConfig)
+    new kafka.producer.Producer[K, T](producerConfig)
+  }
+
+  def consumer(groupId: String, extraOpts: (String, String)*): kafka.consumer.ConsumerConnector = {
+    val props = new java.util.Properties
+    props.put("group.id", groupId)
+    props.put("zookeeper.connect", zookeepers.mkString(","))
+    extraOpts.foreach { case (k, v) => props.put(k, v) }
+    kafka.consumer.Consumer.create(new kafka.consumer.ConsumerConfig(props))
   }
 }

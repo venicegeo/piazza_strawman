@@ -46,7 +46,7 @@
         grant_option=yes
 - postgresql_ext: name=postgis db=geodata
 - copy: src=geodata_setup.sql dest=/tmp/
-- command: psql geodata -f /tmp/geodata_tables.sql
+- command: psql geodata -f /tmp/geodata_setup.sql
 - postgresql_privs: >
         database=geodata
         state=present

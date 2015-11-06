@@ -36,7 +36,7 @@ class PiazzaServiceActor extends Actor with PiazzaService {
   def actorRefFactory = context
   def receive = runRoute(piazzaRoute)
 
-  def kafkaProducer: kafka.javaapi.producer.Producer[String, Array[Byte]] = attemptKafka.get
+  def kafkaProducer: kafka.producer.Producer[String, Array[Byte]] = attemptKafka.get
   def jdbcConnection: java.sql.Connection = attemptJdbc.get
 
   private val attemptKafka = new Attempt({
@@ -44,7 +44,7 @@ class PiazzaServiceActor extends Actor with PiazzaService {
   })
 
   private val attemptJdbc = new Attempt({
-    com.radiantblue.piazza.postgres.Postgres.connect()
+    com.radiantblue.piazza.postgres.Postgres("piazza.metadata.postgres").connect()
   })
 
   // TODO: Hook actor shutdown to close connections using attempt.optional.foreach { _.close }
@@ -54,9 +54,9 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
   implicit def actorSystem: ActorSystem
   implicit def futureContext: ExecutionContext
 
-  def kafkaProducer: kafka.javaapi.producer.Producer[String, Array[Byte]]
+  def kafkaProducer: kafka.producer.Producer[String, Array[Byte]]
   def jdbcConnection: java.sql.Connection
-  def deployer = com.radiantblue.deployer.Deployer.deployer
+  def deployer = com.radiantblue.deployer.Deployer.deployer(jdbcConnection)
 
   private val frontendRoute = 
     path("") {

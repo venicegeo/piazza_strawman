@@ -18,7 +18,3 @@ CREATE TABLE IF NOT EXISTS deployments (
     locator VARCHAR NOT NULL,
     server VARCHAR NOT NULL,
     deployed BOOLEAN NOT NULL);
-
-GRANT ALL ON geometry_columns TO piazza;
-GRANT ALL ON geography_columns TO piazza;
-GRANT ALL ON spatial_ref_sys TO piazza;

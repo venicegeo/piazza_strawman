@@ -355,22 +355,21 @@ sealed case class Deploy[D, S, K]
 }
 
 object Deployer {
-  def deployer(implicit system: ActorSystem, context: ExecutionContext) = {
-    val postgresConnection = Postgres.connect()
+  def deployer(postgresConnection: java.sql.Connection)(implicit system: ActorSystem, context: ExecutionContext) = {
     val config = com.typesafe.config.ConfigFactory.load()
 
     val publisher = {
       val gs = config.getConfig("piazza.geoserver")
-      val pg = config.getConfig("piazza.postgres")
-      val pgUri = new java.net.URI(new java.net.URI(pg.getString("uri")).getSchemeSpecificPart)
+      val pg = Postgres("piazza.geodata.postgres")
+      val pgUri = new java.net.URI(new java.net.URI(pg.uri).getSchemeSpecificPart)
 
       new GeoServerPublish(
         sshUser = gs.getString("ssh.user"),
         sshKey = java.nio.file.Paths.get(gs.getString("ssh.key")),
         geoserverUser = gs.getString("rest.user"),
         geoserverPassword = gs.getString("rest.password"),
-        pgUser = pg.getString("properties.user"),
-        pgPassword = pg.getString("properties.password"),
+        pgUser = pg.properties.get("properties.user").asInstanceOf[String],
+        pgPassword = pg.properties.get("properties.password").asInstanceOf[String],
         pgHost = pgUri.getHost,
         pgPort = if (pgUri.getPort <= 0) 5432 else pgUri.getPort, 
         pgDatabase = pgUri.getPath.drop("/".length))
@@ -389,11 +388,11 @@ object Deployer {
     implicit val system: ActorSystem = ActorSystem("spray-client")
     import system.dispatcher
 
-    val postgresConnection = Postgres.connect()
+    val postgresConnection = Postgres("piazza.metadata.postgres").connect()
     val config = com.typesafe.config.ConfigFactory.load()
 
     val printF = 
-      for (result <- deployer.attemptDeploy(locator)) yield {
+      for (result <- deployer(postgresConnection).attemptDeploy(locator)) yield {
         result match {
           case Deploying => println("Deploying")
           case Deployed(_) => println("Deployed")
