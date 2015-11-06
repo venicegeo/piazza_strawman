@@ -72,12 +72,14 @@ sealed class FileSystemDatasetStorage(prefix: String = "file:///tmp/")(implicit 
  */
 trait Publish[R,S] {
   def publish(metadata: Metadata, geo: GeoMetadata, resource: R, server: S): Future[Unit]
+  def unpublish(metadata: Metadata, geo: GeoMetadata, resource: R, server: S): Future[Unit]
 }
 
 sealed class GeoServerPublish
   (sshUser: String, sshKey: java.nio.file.Path,
    geoserverUser: String, geoserverPassword: String,
-   pgUser: String, pgPassword: String, pgHost: String, pgPort: Int, pgDatabase: String)
+   postgres: Postgres)
+   // pgUser: String, pgPassword: String, pgHost: String, pgPort: Int, pgDatabase: String)
   (implicit system: ActorSystem, ec: ExecutionContext) 
   extends Publish[java.nio.file.Path, Server]
 {
@@ -103,11 +105,26 @@ sealed class GeoServerPublish
     datatype.publish(md, geo, resource, server)
   }
 
+  def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = {
+    val datatype: Publish[java.nio.file.Path, Server] =
+      geo.getNativeFormat match {
+        case "geotiff" => Raster
+        case "zipped-shapefile" => Feature
+      }
+    datatype.unpublish(md, geo, resource, server)
+  }
+
   private object Raster extends Publish[java.nio.file.Path, Server] {
     def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = 
       for {
         _ <- copyFile(resource, server)
         _ <- configure(md, geo, server)
+      } yield ()
+
+    def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] =
+      for {
+        _ <- unconfigure(md, geo, server)
+        _ <- deleteFile(resource, server)
       } yield ()
 
     private def copyFile(resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
@@ -120,6 +137,20 @@ sealed class GeoServerPublish
         "--chmod=u+rw,g+rw,o+r",
         resource.toAbsolutePath.toString,
         s"$sshUser@${server.address}:${server.localFilePath}")
+      require(command.! == 0)
+    }
+
+    private def deleteFile(resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
+      import scala.sys.process._
+      val key = sshKey.toAbsolutePath.toString
+      val path = java.nio.file.Paths.get(server.localFilePath).resolve(resource.getFileName)
+      val command = Vector(
+        "ssh",
+        "-oStrictHostKeyChecking=no",
+        "-q",
+        s"-i$key",
+        "rm",
+        path.toAbsolutePath.toFile.toString)
       require(command.! == 0)
     }
 
@@ -142,6 +173,19 @@ sealed class GeoServerPublish
             geo.getLatitudeLongitudeBoundingBox,
             geo.getCrsCode)))
         _ <- Future { require(layerR.status.isSuccess, "Layer creation failed") }
+      } yield ()
+    }
+
+    def unconfigure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
+      val id = md.getLocator
+      val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
+      val deleteUri = (s"workspaces/piazza/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
+      for {
+        deleteR <- pipeline(Delete(deleteUri))
+        _ <- if (deleteR.status.isSuccess)
+               Future.successful(())
+             else
+               Future.failed(new Exception("Coveragestore deletion failed: " + deleteR.entity.asString))
       } yield ()
     }
 
@@ -211,9 +255,16 @@ sealed class GeoServerPublish
         _ <- configure(md, geo, server)
       } yield ()
 
+    def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = 
+      for {
+        _ <- unconfigure(md, geo, server)
+        _ <- dropTable(md, resource, server)
+      } yield ()
+
     def copyTable(md: Metadata, resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
       import scala.collection.JavaConverters._
       import scala.sys.process._
+      import GeoServerPublish.this.postgres._
       val workDir = java.nio.file.Files.createTempDirectory("unpack-zipped-shapefile")
       val zip = new java.util.zip.ZipFile(resource.toFile)
       val shp = zip.entries.asScala.map(_.getName).find(_.toLowerCase endsWith ".shp").get
@@ -230,10 +281,19 @@ sealed class GeoServerPublish
         "-overwrite",
         "-nln", md.getLocator,
         "-nlt", "PROMOTE_TO_MULTI",
-        s"PG:dbname=$pgDatabase user=$pgUser host=$pgHost port=$pgPort password=$pgPassword",
+        s"PG:dbname='${database}' user='${user}' host='${host}' port='${port}' password='${password}'",
         shpPath.toFile.getAbsolutePath)
       require(command.! == 0)
+    }
 
+    def dropTable(md: Metadata, resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
+      val conn = postgres.connect()
+      try {
+        val query = conn.createStatement()
+        query.execute(s"""DROP TABLE IF EXISTS "${md.getLocator}" CASCADE""");
+      } finally {
+        conn.close()
+      }
     }
 
     def configure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
@@ -248,6 +308,19 @@ sealed class GeoServerPublish
                Future.successful(())
              else 
                Future.failed(new Exception("Layer creation failed: " + layerR.entity.asString))
+      } yield ()
+    }
+
+    def unconfigure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
+      val id = md.getLocator
+      val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
+      val deleteUri = (s"workspaces/paizza/datastores/postgis/featuretypes/${id}?recurse=true": Uri) resolvedAgainst serverUri
+      for {
+        deleteR <- pipeline(Delete(deleteUri))
+        _ <- if (deleteR.status.isSuccess)
+               Future.successful(())
+             else 
+               Future.failed(new Exception("Featuretype deletion failed: " + deleteR.entity.asString))
       } yield ()
     }
 
@@ -361,18 +434,13 @@ object Deployer {
     val publisher = {
       val gs = config.getConfig("piazza.geoserver")
       val pg = Postgres("piazza.geodata.postgres")
-      val pgUri = new java.net.URI(new java.net.URI(pg.uri).getSchemeSpecificPart)
 
       new GeoServerPublish(
         sshUser = gs.getString("ssh.user"),
         sshKey = java.nio.file.Paths.get(gs.getString("ssh.key")),
         geoserverUser = gs.getString("rest.user"),
         geoserverPassword = gs.getString("rest.password"),
-        pgUser = pg.properties.get("properties.user").asInstanceOf[String],
-        pgPassword = pg.properties.get("properties.password").asInstanceOf[String],
-        pgHost = pgUri.getHost,
-        pgPort = if (pgUri.getPort <= 0) 5432 else pgUri.getPort, 
-        pgDatabase = pgUri.getPath.drop("/".length))
+        pg)
     }
 
     Deploy(
