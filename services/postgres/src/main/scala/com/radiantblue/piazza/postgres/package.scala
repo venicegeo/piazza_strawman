@@ -14,17 +14,8 @@ package object postgres {
     deploymentServer: Option[String])
 
   implicit class Queries(val conn: java.sql.Connection) extends AnyVal {
-    private def prepare[T](sql: String)(f: java.sql.PreparedStatement => T): T = {
-      val pstmt = conn.prepareStatement(sql)
-      try {
-        f(pstmt)
-      } finally {
-        pstmt.close()
-      }
-    }
-
-    private def prepareWithGeneratedKeys[T](sql: String)(f: java.sql.PreparedStatement => T): T = {
-      val pstmt = conn.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS)
+    private def prepare[T](sql: String, generatedKeys: Int = java.sql.Statement.NO_GENERATED_KEYS)(f: java.sql.PreparedStatement => T): T = {
+      val pstmt = conn.prepareStatement(sql, generatedKeys)
       try {
         f(pstmt)
       } finally {
@@ -45,7 +36,7 @@ package object postgres {
       }
     }
 
-    private def iterateGeneratedKeys[T](statement: java.sql.PreparedStatement)(f: java.sql.ResultSet => T): Vector[T] = {
+    private def iterateKeys[T](statement: java.sql.PreparedStatement)(f: java.sql.ResultSet => T): Vector[T] = {
       statement.execute()
       val results = statement.getGeneratedKeys()
       try {
@@ -68,11 +59,12 @@ package object postgres {
         m.locator,
         gm.native_srid,
         ST_AsGeoJson(gm.latlon_bounds),
-        d.server,
-        d.deployed
+        s.host,
+        d.state = 'live'
       FROM metadata m 
         LEFT JOIN geometadata gm USING (locator)
         LEFT JOIN deployments d USING (locator)
+        LEFT JOIN servers s ON (s.id = d.server)
       WHERE name LIKE ? ORDER BY m.id LIMIT 10
       """
       prepare(sql) { ps =>
@@ -165,7 +157,7 @@ package object postgres {
         FROM metadata m 
           JOIN geometadata gm USING (locator)
           JOIN deployments d USING (locator)
-        WHERE d.deployed = TRUE 
+        WHERE d.state = 'live'
         AND locator = ?
         LIMIT 1"""
       prepare(sql) { ps =>
@@ -199,34 +191,62 @@ package object postgres {
       }
     }
 
-    def deployedServers(locator: String): Vector[String] = {
+    def deployedServers(locator: String): Vector[Server] = {
       val sql = 
-        "SELECT server FROM deployments WHERE deployed = TRUE AND locator = ?"
+        """
+        SELECT s.host, s.port, s.local_path
+        FROM servers s 
+        JOIN deployments d ON (s.id = d.server)
+        WHERE d.state = 'live' AND d.locator = ?
+        """
       prepare(sql) { ps =>
         ps.setString(1, locator)
-        iterate(ps) { _.getString(1) }
+        iterate(ps) { rs => Server(rs.getString(1), rs.getString(2), rs.getString(3)) }
       }
     }
 
-    def timedOutServers(): Vector[(Long, String, String)] = {
-      val sql = "SELECT id, locator, server FROM deployments WHERE deployed = TRUE AND lifetime < now()"
+    def timedOutServers(): Vector[(Long, String, Server)] = {
+      val sql = 
+        """
+        SELECT d.id, d.locator, s.host, s.port, s.local_path
+        FROM deployments d
+        JOIN leases l ON (l.deployment = d.id)
+        JOIN servers s ON (d.server = s.id)
+        WHERE d.state = 'live' AND l.lifetime < now()
+        """
       prepare(sql) { ps =>
-        iterate(ps) { rs => (rs.getLong(1), rs.getString(2), rs.getString(3)) }
+        iterate(ps) { rs => (rs.getLong(1), rs.getString(2), Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))) }
       }
     }
 
-    def startDeployment(locator: String): (String, Long) = {
-      val server = "192.168.23.13"
-      val sql = "INSERT INTO deployments (locator, server, deployed) VALUES (?, ?, false)"
-      prepareWithGeneratedKeys(sql) { ps =>
+    def startDeployment(locator: String): (Server, Long) = {
+      val sql = 
+        """
+        INSERT INTO deployments (locator, server, state)
+        SELECT ?, s.id, 'starting'
+        FROM servers s
+        LIMIT 1
+        RETURNING 
+          (SELECT host FROM servers WHERE servers.id = deployments.server),
+          (SELECT port FROM servers WHERE servers.id = deployments.server),
+          (SELECT local_path FROM servers WHERE servers.id = deployments.server),
+          id
+        """
+      prepare(sql) { ps =>
         ps.setString(1, locator)
-        ps.setString(2, server)
-        iterateGeneratedKeys(ps)(rs => (server, rs.getLong(1))).head 
+        iterate(ps)({ rs =>
+          (Server(rs.getString(1), rs.getInt(2).toString, rs.getString(3)), rs.getLong(4))
+        }).head 
       }
     }
 
     def completeDeployment(id: Long): Unit = {
-      val sql = "UPDATE deployments SET deployed = TRUE WHERE id = ?"
+      val sql = 
+        """
+        UPDATE deployments 
+        SET state = 'live'
+        WHERE id = ?
+        """
       prepare(sql) { ps =>
         ps.setLong(1, id)
         ps.execute()
@@ -234,7 +254,7 @@ package object postgres {
     }
 
     def failDeployment(id: Long): Unit = {
-      val sql = "DELETE FROM deployments WHERE id = ?"
+      val sql = "UPDATE deployments SET state = 'dead' WHERE id = ?"
       prepare(sql) { ps =>
         ps.setLong(1, id)
         ps.execute()
@@ -242,16 +262,15 @@ package object postgres {
     }
 
     def startUndeployment(id: Long): Unit = {
-      val server = "192.168.23.13"
-      val sql = "UPDATE deployments SET deployed = FALSE WHERE id = ?"
-      prepareWithGeneratedKeys(sql) { ps =>
+      val sql = "UPDATE deployments SET state = 'killing' WHERE id = ?"
+      prepare(sql) { ps =>
         ps.setLong(1, id)
         ps.execute()
       }
     }
 
     def completeUndeployment(id: Long): Unit = {
-      val sql = "DELETE FROM deployments WHERE id = ?"
+      val sql = "UPDATE deployments SET state = 'dead' WHERE id = ?"
       prepare(sql) { ps =>
         ps.setLong(1, id)
         ps.execute()
@@ -259,6 +278,9 @@ package object postgres {
     }
 
     def failUndeployment(id: Long): Unit = {
+      // maybe just don't worry about the difference between layers we decided
+      // to delete and layers we successfully deleted?
+
       // val sql = "DELETE FROM deployments WHERE id = ?"
       // prepare(sql) { ps =>
       //   ps.setLong(1, id)
@@ -266,17 +288,31 @@ package object postgres {
       // }
     }
 
-    def getDeploymentStatus(locator: String): Option[Option[String]] = {
-      val sql = "SELECT server, deployed FROM deployments WHERE locator = ?"
+    /**
+     * None indicates there is no attempted deployment
+     * Some(None) indicates a failed deployment attempt
+     * Some(Some(server)) indicates a server where the deployment was successful
+     */
+    def getDeploymentStatus(locator: String): DeployStatus = {
+      val sql =
+        """
+        SELECT d.state = 'live', d.id, s.host, s.port, s.local_path
+        FROM deployments d
+        JOIN servers s ON (d.server = s.id)
+        WHERE d.locator = ?
+        """
       prepare(sql) { ps =>
         ps.setString(1, locator)
         iterate(ps)({rs =>
-          val deployed = rs.getBoolean(2)
-          if (deployed) 
-            Some(rs.getString(1))
-          else
-            None
-        }).headOption
+          val deployed = rs.getBoolean(1)
+          val id = rs.getInt(2)
+          if (deployed) {
+            val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
+            Live(id, server)
+          } else {
+            Starting(id)
+          }
+        }).headOption.getOrElse(Dead)
       }
     }
 
@@ -313,6 +349,64 @@ package object postgres {
         ps.setDouble(10, g.getLatitudeLongitudeBoundingBox.getMaxY)
         ps.setString(11, g.getNativeFormat)
         ps.executeUpdate()
+      }
+    }
+
+    def attachLease(locator: String, deployment: Long): Lease = {
+      val timeToLive = "1 hour";
+      val sql = 
+        """
+        INSERT INTO leases (locator, deployment, lifetime) VALUES (?, ?, now() + (? :: INTERVAL)) RETURNING id, lifetime
+        """
+      prepare(sql) { ps =>
+        ps.setString(1, locator)
+        ps.setLong(2, deployment)
+        ps.setString(3, timeToLive)
+        iterate(ps)({ rs => Lease(rs.getLong(1), Some(rs.getTimestamp(2))) }).head
+      }
+    }
+
+    def createLease(locator: String, deployment: Long): Lease = {
+      val sql = 
+        """
+        INSERT INTO leases (locator, deployment, lifetime) VALUES (?, ?, NULL) RETURNING id
+        """
+      prepare(sql) { ps =>
+        ps.setString(1, locator)
+        ps.setLong(2, deployment)
+        iterate(ps)({ rs => Lease(rs.getLong(1), None) }).head
+      }
+    }
+
+    def setLeaseTime(id: Long, timeToLive: String): Unit = {
+      val sql =
+        """
+        UPDATE leases SET lifetime = now() + (? :: INTERVAL) WHERE id = ?
+        """
+      prepare(sql) { ps =>
+        ps.setString(1, timeToLive)
+        ps.setLong(2, id)
+        ps.execute()
+      }
+    }
+
+    def getLeaseById(id: Int): (String, java.sql.Timestamp, Server) = {
+      val sql = 
+        """
+        SELECT l.locator, l.lifetime, s.host, s.port, s.local_path
+        FROM leases l
+        JOIN deployments d ON (l.deployment = d.id)
+        JOIN servers s ON (d.server = s.id)
+        WHERE l.id = id
+        """
+      prepare(sql) { ps =>
+        ps.setInt(1, id)
+        iterate(ps)({ rs =>
+          val locator = rs.getString(1)
+          val lifetime = rs.getTimestamp(2)
+          val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
+          (locator, lifetime, server)
+        }).head
       }
     }
   }

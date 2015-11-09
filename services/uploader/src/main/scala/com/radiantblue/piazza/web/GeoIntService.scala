@@ -1,8 +1,7 @@
 package com.radiantblue.piazza.web
 
-import com.radiantblue.piazza.Messages
 import com.radiantblue.deployer._
-import com.radiantblue.piazza.postgres._
+import com.radiantblue.piazza.{ kafka => _, _ }, postgres._
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
@@ -112,13 +111,15 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
         (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
           complete {
             deployer.attemptDeploy(dataset).map { 
-              case Deploying =>
-                HttpResponse(StatusCodes.Accepted, "Deploying")
-              case Deployed(server) => 
-                val redirectTo = uri.withQuery(Uri.Query(("dataset", dataset)))
-                HttpResponse(StatusCodes.Found, headers=List(HttpHeaders.Location(redirectTo)))
-              case Undeployable =>
-                HttpResponse(StatusCodes.BadRequest, s"Cannot deploy dataset with locator '$dataset'")
+              _._2 match {
+                case Starting(_) =>
+                  HttpResponse(StatusCodes.Accepted, "Deploying")
+                case Live(_, server) => 
+                  val redirectTo = uri.withQuery(Uri.Query(("dataset", dataset)))
+                  HttpResponse(StatusCodes.Found, headers=List(HttpHeaders.Location(redirectTo)))
+                case Killing | Dead =>
+                  HttpResponse(StatusCodes.BadRequest, s"Cannot deploy dataset with locator '$dataset'")
+              }
             }
           }
         }

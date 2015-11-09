@@ -24,15 +24,7 @@ import spray.client.pipelining._
 import spray.http._, HttpMethods._
 import spray.httpx.marshalling.Marshaller
 
-import com.radiantblue.piazza.Messages._
-import com.radiantblue.piazza.postgres._
-
-sealed case class Server(address: String, port: String, localFilePath: String)
-
-sealed trait DeployStatus[+S]
-object Deploying extends DeployStatus[Nothing]
-case class Deployed[S](server: S) extends DeployStatus[S]
-object Undeployable extends DeployStatus[Nothing]
+import com.radiantblue.piazza._, Messages._, postgres._
 
 trait MetadataStore {
   def lookup(locator: String): Future[(Metadata, GeoMetadata)]
@@ -384,17 +376,14 @@ trait Track[S, K] {
   def undeploymentStarted(id: K): Future[Unit]
   def undeploymentSucceeded(id: K): Future[Unit]
   def undeploymentFailed(id: K): Future[Unit]
-  def deploymentStatus(id: String): Future[DeployStatus[S]]
+  def deploymentStatus(locator: String): Future[DeployStatus]
   def deployments(id: String): Future[Vector[S]]
   def timedOutDeployments(): Future[Vector[(Long, String, S)]]
 }
 
 sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionContext) extends Track[Server, Long] {
   def deploymentStarted(id: String): Future[(Server, Long)] = 
-    Future {
-      val (server, token) = conn.startDeployment(id)
-      (Server(server, "8081", "/var/lib/geoserver_data/geoserver1/data"), token)
-    }
+    Future { conn.startDeployment(id) }
 
   def deploymentSucceeded(id: Long): Future[Unit] = 
     Future(conn.completeDeployment(id))
@@ -411,52 +400,56 @@ sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionCont
   def undeploymentFailed(id: Long): Future[Unit] =
     Future(conn.failUndeployment(id))
 
-  def deploymentStatus(id: String): Future[DeployStatus[Server]] = 
-    Future {
-      conn.getDeploymentStatus(id) match {
-        case None => Undeployable
-        case Some(None) => Deploying
-        case Some(Some(host)) => 
-          Deployed(Server(host, "8081", "/var/lib/geoserver_data/geoserver1/data"))
-      }
-    }
+  def deploymentStatus(id: String): Future[DeployStatus] = 
+    Future { conn.getDeploymentStatus(id) }
 
   def deployments(id: String): Future[Vector[Server]] = 
-    Future {
-      conn.deployedServers(id)
-        .map(Server(_, "8081", "/var/lib/geoserver_data/geoserver1/data"))
-    }
+    Future { conn.deployedServers(id) }
 
   def timedOutDeployments(): Future[Vector[(Long, String, Server)]] =
-    Future {
-      conn.timedOutServers()
-        .map { case (token, locator, host) => (token, locator, Server(host, "8081", "/var/lib/geoserver_data/geoserver1/data")) }
-    }
+    Future { conn.timedOutServers() }
+}
+
+trait Leasing {
+  def createLease(locator: String, deployToken: Long): Future[Lease]
+  def attachLease(locator: String, deployToken: Long): Future[Lease]
+}
+
+sealed class PostgresLeasing(conn: java.sql.Connection)(implicit ec: ExecutionContext) extends Leasing {
+  def createLease(locator: String, deployToken: Long): Future[Lease] = 
+    Future { conn.createLease(locator, deployToken) }
+
+  def attachLease(locator: String, deployToken: Long): Future[Lease] = 
+    Future { conn.attachLease(locator, deployToken) }
 }
 
 /**
  * The Provisioner[T,S] class handles the lifecycle of datasets of type T
  * provisioned to servers of type S and tracked with deployment keys of type K.
  */
-sealed case class Deploy[D, S]
+sealed case class Deploy[D]
   (metadataStore: MetadataStore,
    dataStore: DatasetStorage[D],
-   // provision: Provision[D, S],
-   publish: Publish[D, S],
-   track: Track[S, Long])
+   publish: Publish[D, com.radiantblue.piazza.Server],
+   leasing: Leasing,
+   track: Track[com.radiantblue.piazza.Server, Long])
   (implicit ec: scala.concurrent.ExecutionContext)
 {
-  def attemptDeploy(locator: String): Future[DeployStatus[S]] = 
+  def attemptDeploy(locator: String): Future[(Lease, DeployStatus)] = 
     track.deploymentStatus(locator).flatMap {
-      case x @ (Deploying | Deployed(_)) => Future.successful(x)
-      case Undeployable => 
+      case status @ Starting(token) =>
+        for (lease <- leasing.createLease(locator, token)) yield (lease, status)
+      case status @ Live(token, _) =>
+        for (lease <- leasing.attachLease(locator, token)) yield (lease, status)
+      case Killing | Dead => 
         for {
           (metadata, geometadata) <- metadataStore.lookup(locator)
           resource <- dataStore.lookup(locator)
           (server, token) <- track.deploymentStarted(locator)
           _ <- publish.publish(metadata, geometadata, resource, server)
           _ <- track.deploymentSucceeded(token)
-        } yield Deployed(server)
+          lease <- leasing.attachLease(locator, token)
+        } yield (lease, Live(token, server))
     }
 
   def cull(): Future[Unit] = 
@@ -491,10 +484,11 @@ object Deployer {
     }
 
     Deploy(
-      new PostgresMetadataStore(postgresConnection),
-      new FileSystemDatasetStorage(),
-      publisher,
-      new PostgresTrack(postgresConnection))
+      metadataStore = new PostgresMetadataStore(postgresConnection),
+      dataStore = new FileSystemDatasetStorage(),
+      publish = publisher,
+      leasing = new PostgresLeasing(postgresConnection),
+      track = new PostgresTrack(postgresConnection))
   }
 
   def main(args: Array[String]): Unit = {
@@ -508,10 +502,10 @@ object Deployer {
 
     val printF = 
       for (result <- deployer(postgresConnection).attemptDeploy(locator)) yield {
-        result match {
-          case Deploying => println("Deploying")
-          case Deployed(_) => println("Deployed")
-          case Undeployable => println(s"Cannot deploy dataset with locator '$locator'")
+        result._2 match {
+          case Starting(_) => println("Deployment in progress")
+          case Live(_, server) => println(s"Deployed to server ${server.address}:${server.port}")
+          case Dead | Killing => println(s"Cannot deploy dataset with locator '$locator'")
         }
       }
 
