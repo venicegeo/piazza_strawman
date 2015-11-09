@@ -8,3 +8,5 @@ libraryDependencies ++= {
     "com.typesafe.akka"   %%  "akka-testkit"  % akkaV   % "test"
   )
 }
+
+mainClass in Compile := Some("com.radiantblue.deployer.Deployer")

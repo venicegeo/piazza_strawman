@@ -208,6 +208,13 @@ package object postgres {
       }
     }
 
+    def timedOutServers(): Vector[(Long, String, String)] = {
+      val sql = "SELECT id, locator, server FROM deployments WHERE deployed = TRUE AND lifetime < now()"
+      prepare(sql) { ps =>
+        iterate(ps) { rs => (rs.getLong(1), rs.getString(2), rs.getString(3)) }
+      }
+    }
+
     def startDeployment(locator: String): (String, Long) = {
       val server = "192.168.23.13"
       val sql = "INSERT INTO deployments (locator, server, deployed) VALUES (?, ?, false)"
@@ -232,6 +239,31 @@ package object postgres {
         ps.setLong(1, id)
         ps.execute()
       }
+    }
+
+    def startUndeployment(id: Long): Unit = {
+      val server = "192.168.23.13"
+      val sql = "UPDATE deployments SET deployed = FALSE WHERE id = ?"
+      prepareWithGeneratedKeys(sql) { ps =>
+        ps.setLong(1, id)
+        ps.execute()
+      }
+    }
+
+    def completeUndeployment(id: Long): Unit = {
+      val sql = "DELETE FROM deployments WHERE id = ?"
+      prepare(sql) { ps =>
+        ps.setLong(1, id)
+        ps.execute()
+      }
+    }
+
+    def failUndeployment(id: Long): Unit = {
+      // val sql = "DELETE FROM deployments WHERE id = ?"
+      // prepare(sql) { ps =>
+      //   ps.setLong(1, id)
+      //   ps.execute()
+      // }
     }
 
     def getDeploymentStatus(locator: String): Option[Option[String]] = {

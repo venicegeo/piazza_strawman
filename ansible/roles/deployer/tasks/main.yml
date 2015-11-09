@@ -6,3 +6,4 @@
 - unarchive: src=deployer-0.1-SNAPSHOT.tgz dest=/opt/
 - file: path=/opt/deployer state=link src=/opt/deployer-0.1-SNAPSHOT
 - copy: src=geoserver-files dest=/opt/deployer-0.1-SNAPSHOT/ mode=0600
+- cron: name="Cull geoserver deployments" minute=5 job="/opt/deployer/bin/deployer -main com.radiantblue.deployer.Cull"

@@ -17,4 +17,5 @@ CREATE TABLE IF NOT EXISTS deployments (
     id SERIAL PRIMARY KEY,
     locator VARCHAR NOT NULL,
     server VARCHAR NOT NULL,
-    deployed BOOLEAN NOT NULL);
+    deployed BOOLEAN NOT NULL,
+    lifetime TIMESTAMP WITH TIME ZONE DEFAULT(now() + '1 hour'));

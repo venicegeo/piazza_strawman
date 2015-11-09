@@ -1,5 +1,5 @@
 ---
-pgdatabase: metadata
+pgdatabase: geodata
 pghost: 192.168.23.12
 pgport: 5432
 pguser: piazza

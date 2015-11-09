@@ -1,4 +1,16 @@
-package com.radiantblue.deployer
+package com.radiantblue {
+  package object deployer {
+    import scala.concurrent.{ ExecutionContext, Future }
+
+    implicit class NoisyFuture[T](val f: Future[T]) extends AnyVal {
+      def noisy(implicit ec: ExecutionContext): Future[T] = {
+        f.map { t => println(t); t }
+      }
+    }
+  }
+}
+
+package com.radiantblue.deployer {
 
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
@@ -96,23 +108,19 @@ sealed class GeoServerPublish
     ~> sendReceive
   )
 
-  def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = {
-    val datatype: Publish[java.nio.file.Path, Server] =
-      geo.getNativeFormat match {
-        case "geotiff" => Raster
-        case "zipped-shapefile" => Feature
-      }
-    datatype.publish(md, geo, resource, server)
-  }
+  def resolvePublisher(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Publish[java.nio.file.Path, Server] =
+    geo.getNativeFormat match {
+      case "geotiff" => Raster
+      case "zipped-shapefile" => Feature
+    }
 
-  def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = {
-    val datatype: Publish[java.nio.file.Path, Server] =
-      geo.getNativeFormat match {
-        case "geotiff" => Raster
-        case "zipped-shapefile" => Feature
-      }
-    datatype.unpublish(md, geo, resource, server)
-  }
+  def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] =
+    resolvePublisher(md, geo, resource, server)
+      .publish(md, geo, resource, server)
+
+  def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] =
+    resolvePublisher(md, geo, resource, server)
+      .unpublish(md, geo, resource, server)
 
   private object Raster extends Publish[java.nio.file.Path, Server] {
     def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = 
@@ -149,9 +157,10 @@ sealed class GeoServerPublish
         "-oStrictHostKeyChecking=no",
         "-q",
         s"-i$key",
+        s"${sshUser}@${server.address}",
         "rm",
         path.toAbsolutePath.toFile.toString)
-      require(command.! == 0)
+      require(command.! == 0, s"Command $command failed")
     }
 
     def configure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
@@ -291,6 +300,11 @@ sealed class GeoServerPublish
       try {
         val query = conn.createStatement()
         query.execute(s"""DROP TABLE IF EXISTS "${md.getLocator}" CASCADE""");
+        println("Dropped table " + md.getLocator)
+      } catch {
+        case scala.util.control.NonFatal(ex) =>
+          ex.printStackTrace()
+          throw ex
       } finally {
         conn.close()
       }
@@ -314,9 +328,10 @@ sealed class GeoServerPublish
     def unconfigure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
       val id = md.getLocator
       val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
-      val deleteUri = (s"workspaces/paizza/datastores/postgis/featuretypes/${id}?recurse=true": Uri) resolvedAgainst serverUri
+      val deleteUri = (s"workspaces/piazza/datastores/postgis/featuretypes/${id}?recurse=true": Uri) resolvedAgainst serverUri
       for {
         deleteR <- pipeline(Delete(deleteUri))
+        _ = println(deleteR)
         _ <- if (deleteR.status.isSuccess)
                Future.successful(())
              else 
@@ -366,8 +381,12 @@ trait Track[S, K] {
   def deploymentStarted(id: String): Future[(S, K)]
   def deploymentSucceeded(id: K): Future[Unit]
   def deploymentFailed(id: K): Future[Unit]
+  def undeploymentStarted(id: K): Future[Unit]
+  def undeploymentSucceeded(id: K): Future[Unit]
+  def undeploymentFailed(id: K): Future[Unit]
   def deploymentStatus(id: String): Future[DeployStatus[S]]
   def deployments(id: String): Future[Vector[S]]
+  def timedOutDeployments(): Future[Vector[(Long, String, S)]]
 }
 
 sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionContext) extends Track[Server, Long] {
@@ -382,6 +401,15 @@ sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionCont
 
   def deploymentFailed(id: Long): Future[Unit] = 
     Future(conn.failDeployment(id))
+
+  def undeploymentStarted(id: Long): Future[Unit] =
+    Future(conn.startUndeployment(id))
+
+  def undeploymentSucceeded(id: Long): Future[Unit] =
+    Future(conn.completeUndeployment(id))
+
+  def undeploymentFailed(id: Long): Future[Unit] =
+    Future(conn.failUndeployment(id))
 
   def deploymentStatus(id: String): Future[DeployStatus[Server]] = 
     Future {
@@ -398,19 +426,25 @@ sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionCont
       conn.deployedServers(id)
         .map(Server(_, "8081", "/var/lib/geoserver_data/geoserver1/data"))
     }
+
+  def timedOutDeployments(): Future[Vector[(Long, String, Server)]] =
+    Future {
+      conn.timedOutServers()
+        .map { case (token, locator, host) => (token, locator, Server(host, "8081", "/var/lib/geoserver_data/geoserver1/data")) }
+    }
 }
 
 /**
  * The Provisioner[T,S] class handles the lifecycle of datasets of type T
  * provisioned to servers of type S and tracked with deployment keys of type K.
  */
-sealed case class Deploy[D, S, K]
+sealed case class Deploy[D, S]
   (metadataStore: MetadataStore,
    dataStore: DatasetStorage[D],
    // provision: Provision[D, S],
    publish: Publish[D, S],
-   track: Track[S, K])
-  (implicit ec: ExecutionContext)
+   track: Track[S, Long])
+  (implicit ec: scala.concurrent.ExecutionContext)
 {
   def attemptDeploy(locator: String): Future[DeployStatus[S]] = 
     track.deploymentStatus(locator).flatMap {
@@ -420,10 +454,23 @@ sealed case class Deploy[D, S, K]
           (metadata, geometadata) <- metadataStore.lookup(locator)
           resource <- dataStore.lookup(locator)
           (server, token) <- track.deploymentStarted(locator)
-          // _ <- provision.provision(metadata, geometadata, resource, server)
           _ <- publish.publish(metadata, geometadata, resource, server)
           _ <- track.deploymentSucceeded(token)
         } yield Deployed(server)
+    }
+
+  def cull(): Future[Unit] = 
+    track.timedOutDeployments.flatMap { deployments =>
+      Future.sequence {
+        for ((token, locator, server) <- deployments) yield
+          for {
+            (md, geo) <- metadataStore.lookup(locator)
+            resource <- dataStore.lookup(locator)
+            _ <- track.undeploymentStarted(token).noisy
+            _ <- publish.unpublish(md, geo, resource, server).noisy
+            _ <- track.undeploymentSucceeded(token).noisy
+          } yield ()
+      }.map(_ => ())
     }
 }
 
@@ -476,4 +523,24 @@ object Deployer {
         system.shutdown()
     }
   }
+}
+
+object Cull {
+  def main(args: Array[String]): Unit = {
+    implicit val system: ActorSystem = ActorSystem("spray-client")
+    import system.dispatcher
+
+    val postgresConnection = Postgres("piazza.metadata.postgres").connect()
+    val config = com.typesafe.config.ConfigFactory.load()
+
+    val dep = Deployer.deployer(postgresConnection)
+    dep.cull().onComplete { _ =>
+      println("Done")
+      try
+        postgresConnection.close()
+      finally
+        system.shutdown()
+    }
+  }
+}
 }

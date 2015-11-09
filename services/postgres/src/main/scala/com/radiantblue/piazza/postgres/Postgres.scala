@@ -15,8 +15,8 @@ case class Postgres(config: com.typesafe.config.Config) {
 
   private lazy val parsedUri = new java.net.URI(new java.net.URI(uri).getSchemeSpecificPart)
 
-  def user = properties.get("properties.user").asInstanceOf[String]
-  def password = properties.get("properties.password").asInstanceOf[String]
+  def user = properties.get("user").asInstanceOf[String]
+  def password = properties.get("password").asInstanceOf[String]
   def host = parsedUri.getHost
   def port = if (parsedUri.getPort < 0) 5432 else parsedUri.getPort
   def database = parsedUri.getPath.drop("/".length)
