@@ -11,7 +11,7 @@ package object postgres {
     locator: String,
     nativeSrid: Option[String],
     latlonBbox: Option[JsValue],
-    deploymentServer: Option[String])
+    deployed: Boolean)
 
   implicit class Queries(val conn: java.sql.Connection) extends AnyVal {
     private def prepare[T](sql: String, generatedKeys: Int = java.sql.Statement.NO_GENERATED_KEYS)(f: java.sql.PreparedStatement => T): T = {
@@ -59,13 +59,12 @@ package object postgres {
         m.locator,
         gm.native_srid,
         ST_AsGeoJson(gm.latlon_bounds),
-        s.host,
-        d.state = 'live'
+        (select bool_or(d.state = 'live') from deployments d where d.locator = m.locator)
       FROM metadata m 
-        LEFT JOIN geometadata gm USING (locator)
-        LEFT JOIN deployments d USING (locator)
-        LEFT JOIN servers s ON (s.id = d.server)
-      WHERE name LIKE ? ORDER BY m.id LIMIT 10
+      LEFT JOIN geometadata gm USING (locator) 
+      WHERE name LIKE ?
+      ORDER BY m.id 
+      LIMIT 10
       """
       prepare(sql) { ps =>
         ps.setString(1, s"%$keyword%")
@@ -77,7 +76,7 @@ package object postgres {
            locator = rs.getString(4),
            nativeSrid = Option(rs.getString(5)),
            latlonBbox = Option(rs.getString(6)).map(_.parseJson),
-           deploymentServer = Option(rs.getString(7)).filter(Function.const(rs.getBoolean(8))))
+           deployed = rs.getBoolean(7))
         }
       }
     }
@@ -208,11 +207,19 @@ package object postgres {
     def timedOutServers(): Vector[(Long, String, Server)] = {
       val sql = 
         """
-        SELECT d.id, d.locator, s.host, s.port, s.local_path
-        FROM deployments d
-        JOIN leases l ON (l.deployment = d.id)
-        JOIN servers s ON (d.server = s.id)
-        WHERE d.state = 'live' AND l.lifetime < now()
+        SELECT * FROM (
+          SELECT 
+            d.id,
+            d.locator,
+            s.host,
+            s.port,
+            s.local_path, 
+            (SELECT max(l.lifetime) from leases l where l.deployment = d.id) lifetime 
+          FROM deployments d 
+          JOIN servers s 
+          ON (d.server = s.id) 
+          WHERE d.state = 'live')
+        results WHERE lifetime < now()
         """
       prepare(sql) { ps =>
         iterate(ps) { rs => (rs.getLong(1), rs.getString(2), Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))) }
@@ -225,6 +232,7 @@ package object postgres {
         INSERT INTO deployments (locator, server, state)
         SELECT ?, s.id, 'starting'
         FROM servers s
+        ORDER BY response_time
         LIMIT 1
         RETURNING 
           (SELECT host FROM servers WHERE servers.id = deployments.server),
@@ -241,13 +249,21 @@ package object postgres {
     }
 
     def completeDeployment(id: Long): Unit = {
-      val sql = 
+      val makeLive = 
         """
         UPDATE deployments 
         SET state = 'live'
         WHERE id = ?
         """
-      prepare(sql) { ps =>
+      val setTimeouts = 
+        """
+        UPDATE leases SET lifetime = now() + '1 hour' WHERE lifetime IS NULL AND deployment = ?"
+        """
+      prepare(makeLive) { ps =>
+        ps.setLong(1, id)
+        ps.execute()
+      }
+      prepare(setTimeouts) { ps =>
         ps.setLong(1, id)
         ps.execute()
       }
@@ -288,15 +304,10 @@ package object postgres {
       // }
     }
 
-    /**
-     * None indicates there is no attempted deployment
-     * Some(None) indicates a failed deployment attempt
-     * Some(Some(server)) indicates a server where the deployment was successful
-     */
     def getDeploymentStatus(locator: String): DeployStatus = {
       val sql =
         """
-        SELECT d.state = 'live', d.id, s.host, s.port, s.local_path
+        SELECT d.state, d.id, s.host, s.port, s.local_path
         FROM deployments d
         JOIN servers s ON (d.server = s.id)
         WHERE d.locator = ?
@@ -304,13 +315,17 @@ package object postgres {
       prepare(sql) { ps =>
         ps.setString(1, locator)
         iterate(ps)({rs =>
-          val deployed = rs.getBoolean(1)
+          val state = rs.getString(1)
           val id = rs.getInt(2)
-          if (deployed) {
-            val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
-            Live(id, server)
-          } else {
-            Starting(id)
+
+          state match {
+            case "starting" =>
+              Starting(id)
+            case "live" => 
+              val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
+              Live(id, server)
+            case "killing" => Killing
+            case "dead" => Dead
           }
         }).headOption.getOrElse(Dead)
       }
@@ -362,7 +377,7 @@ package object postgres {
         ps.setString(1, locator)
         ps.setLong(2, deployment)
         ps.setString(3, timeToLive)
-        iterate(ps)({ rs => Lease(rs.getLong(1), Some(rs.getTimestamp(2))) }).head
+        iterate(ps)({ rs => Lease(rs.getLong(1), deployment, Some(rs.getTimestamp(2))) }).head
       }
     }
 
@@ -374,7 +389,7 @@ package object postgres {
       prepare(sql) { ps =>
         ps.setString(1, locator)
         ps.setLong(2, deployment)
-        iterate(ps)({ rs => Lease(rs.getLong(1), None) }).head
+        iterate(ps)({ rs => Lease(rs.getLong(1), deployment, None) }).head
       }
     }
 
@@ -408,6 +423,34 @@ package object postgres {
           (locator, lifetime, server)
         }).head
       }
+    }
+
+    def checkLeaseDeployment(id: Long): DeployStatus = {
+      val sql = 
+        """
+        SELECT d.state, d.id, s.host, s.port, s.local_path
+        FROM leases l
+        JOIN deployments d ON (l.deployment = d.id)
+        JOIN servers s ON (d.server = s.id)
+        WHERE l.id = ?
+        """
+        prepare(sql) { ps =>
+          ps.setLong(1, id)
+          iterate(ps)({ rs =>
+            val state = rs.getString(1)
+            val id = rs.getInt(2)
+
+            state match {
+              case "starting" => 
+                Starting(id)
+              case "live" =>
+                val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
+                Live(id, server)
+              case "killing" => Killing
+              case "dead" => Dead
+            }
+          }).head
+        }
     }
   }
 }

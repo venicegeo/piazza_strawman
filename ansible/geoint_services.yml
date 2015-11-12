@@ -17,6 +17,6 @@
 - hosts: geoserver
   sudo: yes
   roles:
-      - { role: geoserver, control_port: 8181, http_port: 8081, name: geoserver1 }
-      - { role: geoserver, control_port: 8182, http_port: 8082, name: geoserver2 }
+      - { role: geoserver, control_port: 8181, http_port: 8081, name: geoserver1, jmx_port: 8281 }
+      - { role: geoserver, control_port: 8182, http_port: 8082, name: geoserver2, jmx_port: 8282 }
       - ogcproxy

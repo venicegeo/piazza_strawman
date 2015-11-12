@@ -1,15 +1,58 @@
-- yum: name=unzip state=latest
-- file: name=/opt/geoserver/ state=directory
-- unarchive: src=geoserver-2.8.0-war.zip dest=/opt/geoserver/
-- file: name=/var/lib/tomcats/{{ name }} state=directory owner=tomcat group=tomcat
-- file: name=/var/lib/tomcats/{{ name }}/webapps/ state=directory owner=tomcat group=tomcat
+- yum:
+    name=unzip
+    state=latest
+- file: 
+    name=/opt/geoserver/
+    state=directory
+- unarchive: 
+    src=geoserver-2.8.0-war.zip 
+    dest=/opt/geoserver/
+- file: 
+    name=/var/lib/tomcats/{{ name }} 
+    state=directory 
+    owner=tomcat 
+    group=tomcat
+- file: 
+    name=/var/lib/tomcats/{{ name }}/webapps/
+    state=directory
+    owner=tomcat
+    group=tomcat
 - command: cp -r /etc/tomcat/ /var/lib/tomcats/{{ name }}/conf/
 - command: cp -r /opt/geoserver/geoserver.war /var/lib/tomcats/{{ name }}/webapps/
-- template: src=server.xml.j2 dest=/var/lib/tomcats/{{ name }}/conf/server.xml
-- template: src=tomcat.service.j2 dest=/etc/systemd/system/{{ name }}.service
-- file: name=/var/lib/geoserver_data/ state=directory
-- copy: src=minimal_geoserver_data/ dest=/var/lib/geoserver_data/{{ name }} owner=tomcat group=tomcat
-- file: name=/var/lib/geoserver_data/{{ name }}/data owner=tomcat group=tomcat mode=1774 state=directory
-- template: src=datastore.xml.j2 dest=/var/lib/geoserver_data/{{ name }}/workspaces/piazza/postgis/datastore.xml
-- template: src=context.xml.j2 dest=/var/lib/tomcats/{{ name }}/conf/Catalina/localhost/geoserver.xml
-- service: name={{ name }} enabled=yes state=restarted
+- template:
+    src=server.xml.j2 
+    dest=/var/lib/tomcats/{{ name }}/conf/server.xml
+- template:
+    src=tomcat.service.j2 
+    dest=/etc/systemd/system/{{ name }}.service
+- file: 
+    name=/var/lib/geoserver_data/ 
+    state=directory
+- copy: 
+    src=minimal_geoserver_data/
+    dest=/var/lib/geoserver_data/{{ name }} 
+    owner=tomcat 
+    group=tomcat
+- file: 
+    name=/var/lib/geoserver_data/{{ name }}/data 
+    owner=tomcat
+    group=tomcat 
+    mode=1774
+    state=directory
+- template: 
+    src=datastore.xml.j2 
+    dest=/var/lib/geoserver_data/{{ name }}/workspaces/piazza/postgis/datastore.xml
+- template:
+    src=context.xml.j2 
+    dest=/var/lib/tomcats/{{ name }}/conf/Catalina/localhost/geoserver.xml
+- template:
+    src=tomcat.conf.j2
+    dest=/etc/sysconfig/tomcat@{{name}}
+- replace: 
+    dest=/var/lib/tomcats/{{name}}/conf/server.xml
+    regexp="%h %l %u %t"
+    replace="%D %h %l %u %t"
+- service: 
+    name=tomcat@{{ name }}
+    enabled=yes
+    state=restarted

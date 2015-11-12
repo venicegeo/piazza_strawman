@@ -22,7 +22,7 @@ $(function() {
                  tr.append($("<td>").text(row.checksum));
                  tr.append($("<td>").text(row.size));
                  var td = $("<td>");
-                 if (row.deploymentServer != null) {
+                 if (row.deployed) {
                      td.append($("<a href='/api/deployments?dataset=" + row.locator + "&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities' title='Copy to WMS client'>Capabilities</a>"))
                  } else if (row.nativeSrid != null) {
                      var btn = $("<button class='btn btn-default'>Create</button>");

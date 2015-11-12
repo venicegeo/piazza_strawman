@@ -1,6 +1,20 @@
-- unarchive: src=apache-storm-0.9.5.tar.gz dest=/opt/
-- file: path=/opt/storm state=link src=/opt/apache-storm-0.9.5
+- unarchive: 
+    src=apache-storm-0.9.5.tar.gz
+    dest=/opt/
+- file:
+    path=/opt/storm
+    state=link
+    src=/opt/apache-storm-0.9.5
 - lineinfile: "dest=/opt/storm/conf/storm.yaml state=present line='topology.debug: true'"
-- copy: src=etc/ dest=/etc/ owner=root
-- service: name=storm-nimbus enabled=yes state=started
-- service: name=storm-supervisor enabled=yes state=started
+- copy: 
+    src=etc/
+    dest=/etc/
+    owner=root
+- service:
+    name=storm-nimbus
+    enabled=yes
+    state=started
+- service:
+    name=storm-supervisor
+    enabled=yes
+    state=started

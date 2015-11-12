@@ -413,6 +413,7 @@ sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionCont
 trait Leasing {
   def createLease(locator: String, deployToken: Long): Future[Lease]
   def attachLease(locator: String, deployToken: Long): Future[Lease]
+  def checkDeploy(id: Long): Future[DeployStatus]
 }
 
 sealed class PostgresLeasing(conn: java.sql.Connection)(implicit ec: ExecutionContext) extends Leasing {
@@ -421,6 +422,9 @@ sealed class PostgresLeasing(conn: java.sql.Connection)(implicit ec: ExecutionCo
 
   def attachLease(locator: String, deployToken: Long): Future[Lease] = 
     Future { conn.attachLease(locator, deployToken) }
+
+  def checkDeploy(id: Long): Future[DeployStatus] =
+    Future { conn.checkLeaseDeployment(id) }
 }
 
 /**
@@ -442,15 +446,23 @@ sealed case class Deploy[D]
       case status @ Live(token, _) =>
         for (lease <- leasing.attachLease(locator, token)) yield (lease, status)
       case Killing | Dead => 
+        val deploymentInfo = track.deploymentStarted(locator)
         for {
+          (server, token) <- deploymentInfo
           (metadata, geometadata) <- metadataStore.lookup(locator)
           resource <- dataStore.lookup(locator)
-          (server, token) <- track.deploymentStarted(locator)
           _ <- publish.publish(metadata, geometadata, resource, server)
           _ <- track.deploymentSucceeded(token)
+        } yield ()
+
+        for {
+          (_, token) <- deploymentInfo
           lease <- leasing.attachLease(locator, token)
-        } yield (lease, Live(token, server))
+        } yield (lease, Starting(token))
     }
+
+  def checkDeploy(leaseId: Long): Future[DeployStatus] =
+    leasing.checkDeploy(leaseId)
 
   def cull(): Future[Unit] = 
     track.timedOutDeployments.flatMap { deployments =>

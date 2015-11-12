@@ -9,7 +9,7 @@ After=syslog.target network.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/tomcat/tomcat.conf
+EnvironmentFile=/var/lib/tomcats/{{name}}/conf/tomcat.conf
 Environment="NAME={{ name }}"
 EnvironmentFile=-/etc/sysconfig/tomcat
 ExecStart=/usr/libexec/tomcat/server start

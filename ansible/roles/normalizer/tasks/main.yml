@@ -1,2 +1,7 @@
-- file: dest=/opt/normalizer/ state=directory
-- copy: src=normalizer-assembly-0.1-SNAPSHOT.jar dest=/opt/normalizer owner=root
+- file: 
+    dest=/opt/normalizer/
+    state=directory
+- copy:
+    src=normalizer-assembly-0.1-SNAPSHOT.jar
+    dest=/opt/normalizer
+    owner=root

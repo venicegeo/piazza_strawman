@@ -1,16 +1,31 @@
 - shell: rpm -i http://fedora-epel.mirror.lstn.net/7/x86_64/e/epel-release-7-5.noarch.rpm
   args:
       creates: /etc/yum.repos.d/epel.repo
-- yum: name=postgis state=latest
-- yum: name=postgresql-server state=latest
-- yum: name=python-psycopg2 state=latest
+- yum: name={{item}} state=latest
+  with_items: 
+    - postgis
+    - postgresql-server 
+    - python-psycopg2
 - command: postgresql-setup initdb
   args:
       creates: /var/lib/pgsql/data/pg_hba.conf
-- lineinfile: dest=/var/lib/pgsql/data/pg_hba.conf state=present line="host    all             all             192.168.23.1/24            md5"
-- lineinfile: dest=/var/lib/pgsql/data/postgresql.conf state=present line="listen_addresses = '*'"
-- replace: dest=/var/lib/pgsql/data/pg_hba.conf regexp='(^host.*)ident\s*$' replace='\1md5' backup=yes
-- service: name=postgresql enabled=yes state=restarted
+- lineinfile: 
+    dest=/var/lib/pgsql/data/pg_hba.conf
+    state=present
+    line="host    all             all             192.168.23.1/24            md5"
+- lineinfile: 
+    dest=/var/lib/pgsql/data/postgresql.conf
+    state=present
+    line="listen_addresses = '*'"
+- replace: 
+    dest=/var/lib/pgsql/data/pg_hba.conf
+    regexp='(^host.*)ident\s*$'
+    replace='\1md5'
+    backup=yes
+- service: 
+    name=postgresql
+    enabled=yes
+    state=restarted
 - include: postgres_setup.yml 
   become: true
   become_user: postgres

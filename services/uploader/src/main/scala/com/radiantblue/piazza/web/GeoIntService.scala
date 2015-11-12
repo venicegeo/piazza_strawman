@@ -110,20 +110,29 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
       rawPathPrefix(Slash) {
         (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
           complete {
-            deployer.attemptDeploy(dataset).map { 
-              _._2 match {
-                case Starting(_) =>
-                  HttpResponse(StatusCodes.Accepted, "Deploying")
-                case Live(_, server) => 
+            deployer.attemptDeploy(dataset).flatMap[HttpResponse] { 
+              case (lease, Starting(_)) =>
+                awaitServer(lease.id).map { _ =>
                   val redirectTo = uri.withQuery(Uri.Query(("dataset", dataset)))
                   HttpResponse(StatusCodes.Found, headers=List(HttpHeaders.Location(redirectTo)))
-                case Killing | Dead =>
-                  HttpResponse(StatusCodes.BadRequest, s"Cannot deploy dataset with locator '$dataset'")
-              }
+                }
+              case (_, Live(_, server)) => 
+                val redirectTo = uri.withQuery(Uri.Query(("dataset", dataset)))
+                val response = HttpResponse(StatusCodes.Found, headers=List(HttpHeaders.Location(redirectTo)))
+                Future.successful(response)
+              case (_, Killing | Dead) =>
+                Future.successful(HttpResponse(StatusCodes.BadRequest, s"Cannot deploy dataset with locator '$dataset'"))
             }
           }
         }
       }
+    }
+
+  private def awaitServer(leaseId: Long): Future[Server] = 
+    deployer.checkDeploy(leaseId).flatMap {
+      case Live(_, server) => Future.successful(server)
+      case Starting(_) => java.lang.Thread.sleep(100); awaitServer(leaseId)
+      case Killing | Dead => Future.failed(new Exception("Cannot deploy dataset"))
     }
 
   private val apiRoute =

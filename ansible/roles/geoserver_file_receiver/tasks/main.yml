@@ -1,5 +1,19 @@
 ---
-- yum: name=rsync state=latest
-- user: name=geoserver_files groups=tomcat
-- file: name=/home/geoserver_files/.ssh state=directory owner=geoserver_files group=geoserver_files mode=0700
-- copy: src=geoserver-files.pub dest=/home/geoserver_files/.ssh/authorized_keys owner=geoserver_files group=geoserver_files mode=0600
+- yum: 
+    name=rsync
+    state=latest
+- user: 
+    name=geoserver_files
+    groups=tomcat
+- file: 
+    name=/home/geoserver_files/.ssh
+    state=directory
+    owner=geoserver_files
+    group=geoserver_files
+    mode=0700
+- copy: 
+    src=geoserver-files.pub
+    dest=/home/geoserver_files/.ssh/authorized_keys
+    owner=geoserver_files
+    group=geoserver_files
+    mode=0600
