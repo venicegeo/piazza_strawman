@@ -51,3 +51,10 @@ object UploadScheme extends backtype.storm.spout.Scheme {
   def getOutputFields(): backtype.storm.tuple.Fields =
     new backtype.storm.tuple.Fields("upload")
 }
+
+object LeaseScheme extends backtype.storm.spout.Scheme {
+  def deserialize(bytes: Array[Byte]): java.util.List[AnyRef] =
+    java.util.Arrays.asList(Messages.RequestLease.parseFrom(bytes))
+  def getOutputFields(): backtype.storm.tuple.Fields =
+    new backtype.storm.tuple.Fields("lease")
+}

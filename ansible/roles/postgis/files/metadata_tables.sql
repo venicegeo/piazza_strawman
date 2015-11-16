@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS servers (
     host VARCHAR NOT NULL,
     port INTEGER NOT NULL,
     local_path VARCHAR NOT NULL,
-    id SERIAL PRIMARY KEY);
+    id SERIAL PRIMARY KEY,
+    response_time BIGINT); 
 
 CREATE TABLE IF NOT EXISTS deployments (
     id SERIAL PRIMARY KEY,

@@ -29,3 +29,21 @@ message GeoMetadata {
         required double maxY = 4;
     }
 }
+
+message RequestLease {
+    required string locator = 1;
+    required uint64 timeout = 2;
+    required string replyQueue = 3;
+    optional bytes tag = 4;
+}
+
+message LeaseGranted {
+    required string locator = 1;
+    required uint64 timeout = 2;
+    optional bytes tag = 3;
+}
+
+message Simplify {
+    required string locator = 1;
+    required double tolerance = 2;
+}

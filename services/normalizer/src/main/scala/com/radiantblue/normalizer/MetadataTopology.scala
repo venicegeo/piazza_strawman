@@ -7,7 +7,9 @@ object MetadataTopology {
     System.setProperty("org.geotools.referencing.forceXY", "true");
 
     val uploads = Kafka.spoutForTopic("uploads", UploadScheme)
+    val lease = Kafka.spoutForTopic("lease-requests", LeaseScheme)
     val metadataSink = Kafka.boltForTopic("metadata", DirectTupleMapper)
+    val leaseSink = Kafka.boltForTopic("lease-grants", DirectTupleMapper)
 
     val builder = new backtype.storm.topology.TopologyBuilder
     builder.setSpout("uploads", uploads)
@@ -18,6 +20,10 @@ object MetadataTopology {
       .shuffleGrouping("metadata")
       .shuffleGrouping("geotiff-metadata")
       .shuffleGrouping("zipped-shapefile-metadata")
+
+    // builder.setSpout("lease", lease)
+    // builder.setBolt("leasing", Lease.bolt).shuffleGrouping("lease")
+    // builder.setBolt("publish-leases", leaseSink)
 
     val conf = Kafka.topologyConfig
     backtype.storm.StormSubmitter.submitTopology("Metadata", conf, builder.createTopology)
