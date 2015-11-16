@@ -85,7 +85,7 @@ trait ProxyService extends HttpService with Proxy {
     ogcService
       .flatMap {
         case WCS => caseFoldedParameter("COVERAGEID")
-        case WFS => caseFoldedParameter("FEATURETYPES").filter(! _.contains(',')) | reject(MalformedQueryParamRejection("FEATURETYPES", "Cannot proxy requests for multiple featuretypes (no comma allowed!)"))
+        case WFS => caseFoldedParameter("TYPENAME").filter(! _.contains(',')) | reject(MalformedQueryParamRejection("FEATURETYPES", "Cannot proxy requests for multiple featuretypes (no comma allowed!)"))
         case WMS => caseFoldedParameter("LAYERS").filter(! _.contains(',')) | reject(MalformedQueryParamRejection("LAYERS", "Cannot proxy requests for multiple layers (no comma allowed!)"))
       }
 
@@ -105,19 +105,22 @@ trait ProxyService extends HttpService with Proxy {
     }
 
   def proxyRoute: Route = 
-    pathPrefix("geoserver") { 
-      datasetId { layer =>
-        val id = layer.replaceFirst("^piazza:", "")
-        import scala.util.{ Success, Failure }
-        onComplete(lookup(id)) {
-          case Success(url) => proxyToAuthority(url)
-          case Failure(ex) => complete(StatusCodes.NotFound, s"No dataset with locator $id is deployed: $ex")
+    logRequestResponse("test") { 
+      pathPrefix("geoserver") { 
+        getFromResourceDirectory("com/radiantblue/ogcproxy/web") ~
+        datasetId { layer =>
+          val id = layer.replaceFirst("^piazza:", "")
+          import scala.util.{ Success, Failure }
+          onComplete(lookup(id)) {
+            case Success(url) => proxyToAuthority(url)
+            case Failure(ex) => complete(StatusCodes.NotFound, s"No dataset with locator $id is deployed: $ex")
+          }
+        } ~
+        ogcService {
+          case WMS => getFromResource("com/radiantblue/ogcproxy/wms-capabilities.xml")
+          case WFS => complete("WFS!")
+          case WCS => complete("WCS")
         }
-      } ~
-      ogcService {
-        case WMS => getFromResource("com/radiantblue/ogcproxy/wms-capabilities.xml")
-        case WFS => complete("WFS!")
-        case WCS => complete("WCS")
       }
     }
 }
