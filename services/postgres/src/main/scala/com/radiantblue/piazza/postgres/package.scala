@@ -257,7 +257,7 @@ package object postgres {
         """
       val setTimeouts = 
         """
-        UPDATE leases SET lifetime = now() + '1 hour' WHERE lifetime IS NULL AND deployment = ?"
+        UPDATE leases SET lifetime = now() + '1 hour' WHERE lifetime IS NULL AND deployment = ?
         """
       prepare(makeLive) { ps =>
         ps.setLong(1, id)

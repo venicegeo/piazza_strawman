@@ -33,7 +33,6 @@ message GeoMetadata {
 message RequestLease {
     required string locator = 1;
     required uint64 timeout = 2;
-    required string replyQueue = 3;
     optional bytes tag = 4;
 }
 

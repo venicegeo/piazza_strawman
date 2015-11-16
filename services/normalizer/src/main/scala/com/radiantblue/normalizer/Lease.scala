@@ -8,19 +8,26 @@ object Lease {
     val logger = org.slf4j.LoggerFactory.getLogger(Lease.getClass)
     var _collector: backtype.storm.task.OutputCollector = _
 
-    def deployer = Deployer.deployer(???)(???, ???)
-
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
-      val request = tuple.getValue(0).asInstanceOf[RequestLease]
-      logger.info("Lease request: {}", request)
-      val message = (LeaseGranted.newBuilder
-        .setLocator(request.getLocator)
-        .setTimeout(0)
-        .setTag(request.getTag)
-        .build)
-      _collector.emit(tuple, java.util.Arrays.asList[AnyRef](message.toByteArray))
-      logger.info("Emitted {}", message)
-      _collector.ack(tuple)
+      val postgres = com.radiantblue.piazza.postgres.Postgres("piazza.metadata.postgres").connect()
+      implicit val system = akka.actor.ActorSystem("leasing")
+      import system.dispatcher
+      try {
+        val deployer = Deployer.deployer(postgres)
+        val request = tuple.getValue(0).asInstanceOf[RequestLease]
+        logger.info("Lease request: {}", request)
+        val deployF = deployer.beginDeployment(request.getLocator)._2
+        val message = (LeaseGranted.newBuilder
+          .setLocator(request.getLocator)
+          .setTimeout(0)
+          .setTag(request.getTag)
+          .build)
+        import scala.concurrent.Await, scala.concurrent.duration.Duration
+        Await.result(deployF, Duration.Inf)
+        _collector.emit(tuple, java.util.Arrays.asList[AnyRef](message.toByteArray))
+        logger.info("Emitted {}", message)
+        _collector.ack(tuple)
+      } finally postgres.close()
     }
 
     def prepare(conf: java.util.Map[_, _], context: backtype.storm.task.TopologyContext, collector: backtype.storm.task.OutputCollector): Unit = {

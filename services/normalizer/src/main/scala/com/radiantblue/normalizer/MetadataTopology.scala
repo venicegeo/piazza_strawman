@@ -21,9 +21,9 @@ object MetadataTopology {
       .shuffleGrouping("geotiff-metadata")
       .shuffleGrouping("zipped-shapefile-metadata")
 
-    // builder.setSpout("lease", lease)
-    // builder.setBolt("leasing", Lease.bolt).shuffleGrouping("lease")
-    // builder.setBolt("publish-leases", leaseSink)
+    builder.setSpout("lease", lease)
+    builder.setBolt("leasing", Lease.bolt).shuffleGrouping("lease")
+    builder.setBolt("publish-leases", leaseSink).shuffleGrouping("leasing")
 
     val conf = Kafka.topologyConfig
     backtype.storm.StormSubmitter.submitTopology("Metadata", conf, builder.createTopology)

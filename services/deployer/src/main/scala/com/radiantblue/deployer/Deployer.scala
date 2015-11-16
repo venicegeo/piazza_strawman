@@ -446,20 +446,24 @@ sealed case class Deploy[D]
       case status @ Live(token, _) =>
         for (lease <- leasing.attachLease(locator, token)) yield (lease, status)
       case Killing | Dead => 
-        val deploymentInfo = track.deploymentStarted(locator)
         for {
-          (server, token) <- deploymentInfo
-          (metadata, geometadata) <- metadataStore.lookup(locator)
-          resource <- dataStore.lookup(locator)
-          _ <- publish.publish(metadata, geometadata, resource, server)
-          _ <- track.deploymentSucceeded(token)
-        } yield ()
-
-        for {
-          (_, token) <- deploymentInfo
+          token <- beginDeployment(locator)._1
           lease <- leasing.attachLease(locator, token)
         } yield (lease, Starting(token))
     }
+
+  def beginDeployment(locator: String): (Future[Long], Future[Server]) = {
+    val deploymentInfo = track.deploymentStarted(locator)
+    val deployment = 
+      for {
+        (server, token) <- deploymentInfo
+        (metadata, geometadata) <- metadataStore.lookup(locator)
+        resource <- dataStore.lookup(locator)
+        _ <- publish.publish(metadata, geometadata, resource, server)
+        _ <- track.deploymentSucceeded(token)
+      } yield server
+    (deploymentInfo.map(_._2), deployment)
+  }
 
   def checkDeploy(leaseId: Long): Future[DeployStatus] =
     leasing.checkDeploy(leaseId)

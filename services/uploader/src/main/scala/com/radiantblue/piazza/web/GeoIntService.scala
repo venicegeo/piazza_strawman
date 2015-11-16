@@ -5,6 +5,7 @@ import com.radiantblue.piazza.{ kafka => _, _ }, postgres._
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
+import scala.concurrent.Promise
 
 import akka.actor.{ Actor, ActorSystem }
 import spray.routing._
@@ -109,31 +110,73 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     post {
       rawPathPrefix(Slash) {
         (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
-          complete {
-            deployer.attemptDeploy(dataset).flatMap[HttpResponse] { 
-              case (lease, Starting(_)) =>
-                awaitServer(lease.id).map { _ =>
-                  val redirectTo = uri.withQuery(Uri.Query(("dataset", dataset)))
-                  HttpResponse(StatusCodes.Found, headers=List(HttpHeaders.Location(redirectTo)))
-                }
-              case (_, Live(_, server)) => 
-                val redirectTo = uri.withQuery(Uri.Query(("dataset", dataset)))
-                val response = HttpResponse(StatusCodes.Found, headers=List(HttpHeaders.Location(redirectTo)))
-                Future.successful(response)
-              case (_, Killing | Dead) =>
-                Future.successful(HttpResponse(StatusCodes.BadRequest, s"Cannot deploy dataset with locator '$dataset'"))
-            }
+          val tag = leaseTag()
+          val request = Messages.RequestLease.newBuilder
+            .setLocator(dataset)
+            .setTimeout(60 * 60 * 1000)
+            .setTag(com.google.protobuf.ByteString.copyFrom(tag))
+            .build()
+          val await = awaitDeploymentWithTag(tag)
+          sendToKafkaQueue("lease-requests", request.toByteArray)
+          onComplete(await) {
+            case scala.util.Success(_) => complete("Deployed")
+              complete {
+                val redirectTo = uri.withQuery(Uri.Query("dataset" -> dataset))
+                HttpResponse(
+                  StatusCodes.Found,
+                  headers = List(HttpHeaders.Location(redirectTo)))
+              }
+            case scala.util.Failure(_) => 
+              complete {
+                HttpResponse(
+                  StatusCodes.BadRequest,
+                  s"Cannot deploy dataset $dataset")
+              }
           }
         }
       }
     }
 
-  private def awaitServer(leaseId: Long): Future[Server] = 
-    deployer.checkDeploy(leaseId).flatMap {
-      case Live(_, server) => Future.successful(server)
-      case Starting(_) => java.lang.Thread.sleep(100); awaitServer(leaseId)
-      case Killing | Dead => Future.failed(new Exception("Cannot deploy dataset"))
+  private def sendToKafkaQueue(queue: String, value: Array[Byte]): Unit =
+    kafkaProducer.send(new kafka.producer.KeyedMessage(queue, value))
+
+  private def leaseTag(): Array[Byte] = {
+    val buffer = java.nio.ByteBuffer.allocate(java.lang.Long.BYTES)
+    buffer.putLong(scala.util.Random.nextLong())
+    buffer.array()
+  }
+
+  private def awaitDeploymentWithTag(tag: Array[Byte]): Future[Unit] = 
+    synchronized {
+      val promise = Promise[Unit]()
+      pendingDeployments += (tag.toSeq -> promise)
+      promise.future
     }
+
+  var pendingDeployments: Map[Seq[Byte], Promise[Unit]] = Map.empty
+
+  val deploymentWatcher = Future { com.radiantblue.piazza.kafka.Kafka
+    .consumer("uploader-lease-grants")
+    .createMessageStreamsByFilter(kafka.consumer.Whitelist("lease-grants"))
+    .map { stream => 
+      stream.foreach { message => 
+        try {
+          val grant = Messages.LeaseGranted.parseFrom(message.message)
+          PiazzaService.this.synchronized {
+            val key: Array[Byte] = grant.getTag.toByteArray
+            pendingDeployments.get(key.toSeq) match {
+              case Some(promise) =>
+                promise.success(())
+                pendingDeployments = pendingDeployments - key.toSeq
+              case None => 
+            }
+          }
+        } catch {
+          case scala.util.control.NonFatal(ex) => ex.printStackTrace
+        }
+      } 
+    }
+  }
 
   private val apiRoute =
     pathPrefix("datasets") { datasetsApi } ~ 
