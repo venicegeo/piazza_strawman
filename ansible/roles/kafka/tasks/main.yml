@@ -9,6 +9,10 @@
     src=etc/
     dest=/etc/
     owner=root
+- lineinfile:
+    dest=/opt/kafka/config/server.properties
+    state=present
+    line="advertised.host.name={{ansible_eth1.ipv4.address}}"
 - service:
     name=kafka
     enabled=yes

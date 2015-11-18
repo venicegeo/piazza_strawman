@@ -20,7 +20,7 @@ object GeoIntMessaging extends Build {
   lazy val root = project
     .in(file("."))
     .disablePlugins(AssemblyPlugin)
-    .aggregate(core, ogcproxy, uploader, normalizer, deployer, postgres, kafka, featureSimplifier)
+    .aggregate(core, ogcproxy, uploader, normalizer, deployer, postgres, kafka)
     .settings(commonSettings: _*)
   lazy val core = project
     .disablePlugins(AssemblyPlugin)
@@ -54,8 +54,4 @@ object GeoIntMessaging extends Build {
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
     .dependsOn(core, postgres)
-  lazy val featureSimplifier = project
-    .enablePlugins(JavaAppPackaging)
-    .disablePlugins(AssemblyPlugin)
-    .settings(commonSettings:_*)
 }

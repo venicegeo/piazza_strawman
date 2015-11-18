@@ -12,6 +12,7 @@ object Lease {
       val postgres = com.radiantblue.piazza.postgres.Postgres("piazza.metadata.postgres").connect()
       implicit val system = akka.actor.ActorSystem("leasing")
       import system.dispatcher
+      import scala.concurrent.Await, scala.concurrent.duration.Duration
       try {
         val deployer = Deployer.deployer(postgres)
         val request = tuple.getValue(0).asInstanceOf[RequestLease]
@@ -22,11 +23,13 @@ object Lease {
           .setTimeout(0)
           .setTag(request.getTag)
           .build)
-        import scala.concurrent.Await, scala.concurrent.duration.Duration
         Await.result(deployF, Duration.Inf)
         _collector.emit(tuple, java.util.Arrays.asList[AnyRef](message.toByteArray))
         logger.info("Emitted {}", message)
         _collector.ack(tuple)
+      } catch {
+        case scala.util.control.NonFatal(ex) => logger.error("Error granting lease: " + ex)
+        _collector.fail(tuple)
       } finally postgres.close()
     }
 

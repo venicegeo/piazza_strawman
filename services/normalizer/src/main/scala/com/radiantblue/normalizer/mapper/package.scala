@@ -58,3 +58,17 @@ object LeaseScheme extends backtype.storm.spout.Scheme {
   def getOutputFields(): backtype.storm.tuple.Fields =
     new backtype.storm.tuple.Fields("lease")
 }
+
+object LeaseGrantScheme extends backtype.storm.spout.Scheme {
+  def deserialize(bytes: Array[Byte]): java.util.List[AnyRef] =
+    java.util.Arrays.asList(Messages.LeaseGranted.parseFrom(bytes))
+  def getOutputFields(): backtype.storm.tuple.Fields =
+    new backtype.storm.tuple.Fields("lease-grant")
+}
+
+object SimplifyScheme extends backtype.storm.spout.Scheme {
+  def deserialize(bytes: Array[Byte]): java.util.List[AnyRef] =
+    java.util.Arrays.asList(Messages.Simplify.parseFrom(bytes))
+  def getOutputFields(): backtype.storm.tuple.Fields =
+    new backtype.storm.tuple.Fields("simplify")
+}

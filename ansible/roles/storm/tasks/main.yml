@@ -6,6 +6,7 @@
     state=link
     src=/opt/apache-storm-0.9.5
 - lineinfile: "dest=/opt/storm/conf/storm.yaml state=present line='topology.debug: true'"
+- lineinfile: "dest=/opt/storm/conf/storm.yaml state=present line='worker.childopts: -Dorg.geotools.referencing.forceXY=true'"
 - copy: 
     src=etc/
     dest=/etc/

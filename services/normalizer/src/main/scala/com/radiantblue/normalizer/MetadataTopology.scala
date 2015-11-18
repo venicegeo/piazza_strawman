@@ -4,10 +4,10 @@ import mapper._
 
 object MetadataTopology {
   def main(args: Array[String]): Unit = {
-    System.setProperty("org.geotools.referencing.forceXY", "true");
-
     val uploads = Kafka.spoutForTopic("uploads", UploadScheme)
     val lease = Kafka.spoutForTopic("lease-requests", LeaseScheme)
+    val simplifyRequests = Kafka.spoutForTopic("simplify-requests", SimplifyScheme)
+    val leaseGrants = Kafka.spoutForTopic("lease-grants", LeaseGrantScheme)
     val metadataSink = Kafka.boltForTopic("metadata", DirectTupleMapper)
     val leaseSink = Kafka.boltForTopic("lease-grants", DirectTupleMapper)
 
@@ -24,6 +24,11 @@ object MetadataTopology {
     builder.setSpout("lease", lease)
     builder.setBolt("leasing", Lease.bolt).shuffleGrouping("lease")
     builder.setBolt("publish-leases", leaseSink).shuffleGrouping("leasing")
+
+    builder.setSpout("simplify-requests", simplifyRequests)
+    builder.setBolt("enqueue-simplification", FeatureSimplifier.leaseBolt).shuffleGrouping("simplify-requests")
+    builder.setSpout("lease-grants", leaseGrants)
+    builder.setBolt("simplification-processing", FeatureSimplifier.simplifyBolt).shuffleGrouping("lease-grants")
 
     val conf = Kafka.topologyConfig
     backtype.storm.StormSubmitter.submitTopology("Metadata", conf, builder.createTopology)

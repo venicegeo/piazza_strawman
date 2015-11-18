@@ -39,11 +39,11 @@ class PiazzaServiceActor extends Actor with PiazzaService {
   def kafkaProducer: kafka.producer.Producer[String, Array[Byte]] = attemptKafka.get
   def jdbcConnection: java.sql.Connection = attemptJdbc.get
 
-  private val attemptKafka = new Attempt({
+  private lazy val attemptKafka = new Attempt({
     com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
   })
 
-  private val attemptJdbc = new Attempt({
+  private lazy val attemptJdbc = new Attempt({
     com.radiantblue.piazza.postgres.Postgres("piazza.metadata.postgres").connect()
   })
 
@@ -98,6 +98,12 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
                 xml.wms_1_3_0(jdbcConnection.deploymentWithMetadata(dataset))
               }
             }
+          case (Some("WFS"), Some("1.0.0"), Some("GetCapabilities")) => 
+            complete {
+              Future {
+                xml.wfs_1_0_0(jdbcConnection.deploymentWithMetadata(dataset))
+              }
+            }
           case _ =>
             complete { 
               Future {
@@ -110,15 +116,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     post {
       rawPathPrefix(Slash) {
         (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
-          val tag = leaseTag()
-          val request = Messages.RequestLease.newBuilder
-            .setLocator(dataset)
-            .setTimeout(60 * 60 * 1000)
-            .setTag(com.google.protobuf.ByteString.copyFrom(tag))
-            .build()
-          val await = awaitDeploymentWithTag(tag)
-          sendToKafkaQueue("lease-requests", request.toByteArray)
-          onComplete(await) {
+          onComplete(awaitDeployment(dataset)) {
             case scala.util.Success(_) => complete("Deployed")
               complete {
                 val redirectTo = uri.withQuery(Uri.Query("dataset" -> dataset))
@@ -137,45 +135,29 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
       }
     }
 
-  private def sendToKafkaQueue(queue: String, value: Array[Byte]): Unit =
-    kafkaProducer.send(new kafka.producer.KeyedMessage(queue, value))
-
-  private def leaseTag(): Array[Byte] = {
-    val buffer = java.nio.ByteBuffer.allocate(java.lang.Long.BYTES)
-    buffer.putLong(scala.util.Random.nextLong())
-    buffer.array()
-  }
-
-  private def awaitDeploymentWithTag(tag: Array[Byte]): Future[Unit] = 
-    synchronized {
-      val promise = Promise[Unit]()
-      pendingDeployments += (tag.toSeq -> promise)
-      promise.future
-    }
-
-  var pendingDeployments: Map[Seq[Byte], Promise[Unit]] = Map.empty
-
-  val deploymentWatcher = Future { com.radiantblue.piazza.kafka.Kafka
+  val leaseClient = new LeaseClient[Promise[Unit]](kafkaProducer)
+  val listenF = Future { com.radiantblue.piazza.kafka.Kafka
     .consumer("uploader-lease-grants")
     .createMessageStreamsByFilter(kafka.consumer.Whitelist("lease-grants"))
     .map { stream => 
       stream.foreach { message => 
         try {
           val grant = Messages.LeaseGranted.parseFrom(message.message)
-          PiazzaService.this.synchronized {
-            val key: Array[Byte] = grant.getTag.toByteArray
-            pendingDeployments.get(key.toSeq) match {
-              case Some(promise) =>
-                promise.success(())
-                pendingDeployments = pendingDeployments - key.toSeq
-              case None => 
-            }
-          }
+          val key: Array[Byte] = grant.getTag.toByteArray
+          val callback = leaseClient.retrieveContext(grant)
+          callback.foreach { case (lease, promise) => promise.success(()) }
         } catch {
           case scala.util.control.NonFatal(ex) => ex.printStackTrace
         }
       } 
     }
+    ??? 
+  }
+
+  private def awaitDeployment(locator: String): Future[Unit] = {
+    val promise = Promise[Unit]()
+    leaseClient.requestLease(locator, 60 * 60 * 1000, promise)
+    promise.future
   }
 
   private val apiRoute =
@@ -189,4 +171,40 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
   }
 
   val piazzaRoute = pathPrefix("api")(apiRoute) ~ frontendRoute
+}
+
+class LeaseClient[C](val kafkaProducer: kafka.producer.Producer[String, Array[Byte]]) {
+  var pending: Map[Seq[Byte], C] = Map.empty
+  def requestLease(locator: String, timeout: Long, context: C): Unit = {
+    val tag = leaseTag()
+    synchronized {
+      pending += (tag.toSeq -> context)
+    }
+    val request = Messages.RequestLease.newBuilder
+      .setLocator(locator)
+      .setTimeout(timeout)
+      .setTag(com.google.protobuf.ByteString.copyFrom(tag))
+      .build()
+    sendToKafkaQueue("lease-requests", request.toByteArray)
+  }
+
+  def retrieveContext(grant: Messages.LeaseGranted): Option[(Lease, C)] = {
+    val lease = Lease(0, 0, None) // TODO: Get lease details from Grant message
+    val key = grant.getTag.toByteArray
+    val context = synchronized {
+      val c = pending.get(key.toSeq)
+      pending -= key.toSeq
+      c
+    }
+    context.map(c => (lease, c))
+  }
+
+  private def leaseTag(): Array[Byte] = {
+    val buffer = java.nio.ByteBuffer.allocate(java.lang.Long.BYTES)
+    buffer.putLong(scala.util.Random.nextLong())
+    buffer.array()
+  }
+
+  private def sendToKafkaQueue(queue: String, value: Array[Byte]): Unit =
+    kafkaProducer.send(new kafka.producer.KeyedMessage(queue, value))
 }

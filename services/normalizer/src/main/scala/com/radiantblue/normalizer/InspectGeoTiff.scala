@@ -5,8 +5,6 @@ import com.radiantblue.piazza.Messages
 import scala.collection.JavaConverters._
 
 object InspectGeoTiff {
-  System.setProperty("org.geotools.referencing.forceXY", "true");
-
   val bolt: backtype.storm.topology.IRichBolt = new backtype.storm.topology.base.BaseRichBolt {
     val logger = org.slf4j.LoggerFactory.getLogger(InspectGeoTiff.getClass)
     var _collector: backtype.storm.task.OutputCollector = _
