@@ -168,11 +168,13 @@ object FeatureSimplifier {
       context -= key.toSeq
       result
     }
-    val tolerance = ctx.get._2
-    val wfsCapabilitiesUrl = wfsUrl(g)
-    val resultFile = getResultFile
-    run(wfsCapabilitiesUrl, resultFile, tolerance)
-    val archive = zipCompress(resultFile)
-    publish(archive)
+
+    for ((_, tolerance) <- ctx) {
+      val wfsCapabilitiesUrl = wfsUrl(g)
+      val resultFile = getResultFile
+      run(wfsCapabilitiesUrl, resultFile, tolerance)
+      val archive = zipCompress(resultFile)
+      publish(archive)
+    }
   }
 }

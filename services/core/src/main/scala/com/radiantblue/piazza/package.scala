@@ -8,4 +8,4 @@ case class Live(id: Long, server: com.radiantblue.piazza.Server) extends DeployS
 object Killing extends DeployStatus
 object Dead extends DeployStatus
 
-sealed case class Lease(id: Long, deployment: Long, lifetime: Option[java.sql.Timestamp])
+sealed case class Lease(id: Long, deployment: Long, lifetime: Option[java.sql.Timestamp], tag: Array[Byte])

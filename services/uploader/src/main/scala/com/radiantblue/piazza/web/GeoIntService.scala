@@ -80,7 +80,8 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     post {
       formFields("data".as[BodyPart]) { data => 
         complete { 
-          (new com.radiantblue.deployer.FileSystemDatasetStorage()).store(data).map { locator =>
+          Future {
+            val locator = (new com.radiantblue.deployer.FileSystemDatasetStorage()).store(data)
             fireUploadEvent(data.filename.getOrElse(""), locator)
             HttpResponse(status=StatusCodes.Found, headers=List(HttpHeaders.Location("/")))
           }
@@ -145,6 +146,10 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
           val grant = Messages.LeaseGranted.parseFrom(message.message)
           val key: Array[Byte] = grant.getTag.toByteArray
           val callback = leaseClient.retrieveContext(grant)
+          for ((lease, promise) <- callback) {
+            promise.success(())
+            println(s"finished waiting on $lease")
+          }
           callback.foreach { case (lease, promise) => promise.success(()) }
         } catch {
           case scala.util.control.NonFatal(ex) => ex.printStackTrace
@@ -189,8 +194,8 @@ class LeaseClient[C](val kafkaProducer: kafka.producer.Producer[String, Array[By
   }
 
   def retrieveContext(grant: Messages.LeaseGranted): Option[(Lease, C)] = {
-    val lease = Lease(0, 0, None) // TODO: Get lease details from Grant message
     val key = grant.getTag.toByteArray
+    val lease = Lease(0, 0, None, key) // TODO: Get lease details from Grant message
     val context = synchronized {
       val c = pending.get(key.toSeq)
       pending -= key.toSeq

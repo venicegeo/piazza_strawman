@@ -90,18 +90,13 @@ trait ProxyService extends HttpService with Proxy {
       }
 
   val lookup: String => Future[Uri] =
-    id => {
+    id => Future {
       val conn = Postgres("piazza.metadata.postgres").connect()
-      val uriF =
-        for {
-          servers <- (new com.radiantblue.deployer.PostgresTrack(conn)).deployments(id)
-          if servers.nonEmpty
-          srv = servers(1 % servers.size)
-        } yield {
-          s"http://${srv.address}:${srv.port}" : Uri
-        }
-      uriF.onComplete { _ => conn.close() }
-      uriF
+      try {
+        val servers = (new com.radiantblue.deployer.PostgresTrack(conn)).deployments(id)
+        val srv = servers(1 % servers.size)
+        s"http://${srv.address}:${srv.port}" : Uri
+      } finally conn.close()
     }
 
   def proxyRoute: Route = 

@@ -367,29 +367,31 @@ package object postgres {
       }
     }
 
-    def attachLease(locator: String, deployment: Long): Lease = {
+    def attachLease(locator: String, deployment: Long, tag: Array[Byte]): Lease = {
       val timeToLive = "1 hour";
       val sql = 
         """
-        INSERT INTO leases (locator, deployment, lifetime) VALUES (?, ?, now() + (? :: INTERVAL)) RETURNING id, lifetime
+        INSERT INTO leases (locator, deployment, lifetime, tag) VALUES (?, ?, now() + (? :: INTERVAL), ?) RETURNING id, lifetime
         """
       prepare(sql) { ps =>
         ps.setString(1, locator)
         ps.setLong(2, deployment)
         ps.setString(3, timeToLive)
-        iterate(ps)({ rs => Lease(rs.getLong(1), deployment, Some(rs.getTimestamp(2))) }).head
+        ps.setBytes(4, tag)
+        iterate(ps)({ rs => Lease(rs.getLong(1), deployment, Some(rs.getTimestamp(2)), tag) }).head
       }
     }
 
-    def createLease(locator: String, deployment: Long): Lease = {
+    def createLease(locator: String, deployment: Long, tag: Array[Byte]): Lease = {
       val sql = 
         """
-        INSERT INTO leases (locator, deployment, lifetime) VALUES (?, ?, NULL) RETURNING id
+        INSERT INTO leases (locator, deployment, lifetime, tag) VALUES (?, ?, NULL, ?) RETURNING id
         """
       prepare(sql) { ps =>
         ps.setString(1, locator)
         ps.setLong(2, deployment)
-        iterate(ps)({ rs => Lease(rs.getLong(1), deployment, None) }).head
+        ps.setBytes(3, tag)
+        iterate(ps)({ rs => Lease(rs.getLong(1), deployment, None, tag) }).head
       }
     }
 
@@ -434,23 +436,33 @@ package object postgres {
         JOIN servers s ON (d.server = s.id)
         WHERE l.id = ?
         """
-        prepare(sql) { ps =>
-          ps.setLong(1, id)
-          iterate(ps)({ rs =>
-            val state = rs.getString(1)
-            val id = rs.getInt(2)
+      prepare(sql) { ps =>
+        ps.setLong(1, id)
+        iterate(ps)({ rs =>
+          val state = rs.getString(1)
+          val id = rs.getInt(2)
 
-            state match {
-              case "starting" => 
-                Starting(id)
-              case "live" =>
-                val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
-                Live(id, server)
-              case "killing" => Killing
-              case "dead" => Dead
-            }
-          }).head
+          state match {
+            case "starting" => 
+              Starting(id)
+            case "live" =>
+              val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
+              Live(id, server)
+            case "killing" => Killing
+            case "dead" => Dead
+          }
+        }).head
+      }
+    }
+
+    def getLeasesByDeployment(id: Long): Vector[Lease] = {
+      val sql = """ SELECT l.id, l.deployment, l.lifetime, l.tag FROM leases l WHERE l.deployment = ? """
+      prepare(sql) { ps =>
+        ps.setLong(1, id)
+        iterate(ps) { rs =>
+          Lease(rs.getLong(1), rs.getLong(2), Option(rs.getTimestamp(3)), rs.getBytes(4))
         }
+      }
     }
   }
 }

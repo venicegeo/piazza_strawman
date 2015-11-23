@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS leases (
     id SERIAL PRIMARY KEY,
     locator VARCHAR NOT NULL,
     deployment INTEGER REFERENCES deployments (id),
-    lifetime TIMESTAMP WITH TIME ZONE DEFAULT(now() + '1 hour'));
+    lifetime TIMESTAMP WITH TIME ZONE DEFAULT(now() + '1 hour'),
+    tag BYTEA);
 
 INSERT INTO servers (host, port, local_path) VALUES
     ('192.168.23.13', 8081, '/var/lib/geoserver_data/geoserver1/data'),

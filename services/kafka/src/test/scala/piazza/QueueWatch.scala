@@ -63,7 +63,7 @@ object QueuePost {
   def main(args: Array[String]): Unit = {
     val producer = Kafka.producer[String, Array[Byte]]()
     val message = Simplify.newBuilder
-      .setLocator("piazza6525950456824906652upload")
+      .setLocator("piazza8722960363105860268upload")
       .setTolerance(0.1)
       .build()
     val keyedMessage = 

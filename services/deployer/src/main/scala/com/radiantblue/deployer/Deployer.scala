@@ -27,14 +27,14 @@ import spray.httpx.marshalling.Marshaller
 import com.radiantblue.piazza._, Messages._, postgres._
 
 trait MetadataStore {
-  def lookup(locator: String): Future[(Metadata, GeoMetadata)]
+  def lookup(locator: String): (Metadata, GeoMetadata)
 }
 
 class PostgresMetadataStore(conn: java.sql.Connection)(implicit ec: ExecutionContext)
   extends MetadataStore
 {
-  def lookup(locator: String): Future[(Metadata, GeoMetadata)] =
-    Future(conn.datasetWithMetadata(locator))
+  def lookup(locator: String): (Metadata, GeoMetadata) =
+    conn.datasetWithMetadata(locator)
 }
 
 /**
@@ -42,32 +42,30 @@ class PostgresMetadataStore(conn: java.sql.Connection)(implicit ec: ExecutionCon
  * in some internal representation R, addressable by opaque string identifiers
  */
 trait DatasetStorage[R] {
-  def lookup(id: String): Future[R]
-  def store(body: BodyPart): Future[String]
+  def lookup(id: String): R
+  def store(body: BodyPart): String
 }
 
-sealed class FileSystemDatasetStorage(prefix: String = "file:///tmp/")(implicit ec: ExecutionContext) extends DatasetStorage[java.nio.file.Path] {
+sealed class FileSystemDatasetStorage(prefix: String = "file:///tmp/") extends DatasetStorage[java.nio.file.Path] {
   import java.nio.file.{ Files, Path, Paths }
   private val prefixPath = Paths.get(new java.net.URI(prefix))
-  def lookup(id: String): Future[Path] =
-    Future {
-      val path = prefixPath.resolve(Paths.get(id))
-      if (Files.exists(path)) {
-        path
-      } else {
-        sys.error(s"$path does not exist (resolved from $id)")
-      }
+  def lookup(id: String): Path = {
+    val path = prefixPath.resolve(Paths.get(id))
+    if (Files.exists(path)) {
+      path
+    } else {
+      sys.error(s"$path does not exist (resolved from $id)")
     }
+  }
 
-  def store(body: BodyPart): Future[String] =
-    Future {
-      val buffs = body.entity.data.toByteString.asByteBuffers
-      val path = Files.createTempFile(prefixPath, "piazza", "upload")
-      val file = Files.newByteChannel(path, java.nio.file.StandardOpenOption.WRITE)
-      try buffs.foreach(file.write(_))
-      finally file.close()
-      prefixPath.relativize(path).toString
-    }
+  def store(body: BodyPart): String = {
+    val buffs = body.entity.data.toByteString.asByteBuffers
+    val path = Files.createTempFile(prefixPath, "piazza", "upload")
+    val file = Files.newByteChannel(path, java.nio.file.StandardOpenOption.WRITE)
+    try buffs.foreach(file.write(_))
+    finally file.close()
+    prefixPath.relativize(path).toString
+  }
 }
 
 /**
@@ -75,8 +73,8 @@ sealed class FileSystemDatasetStorage(prefix: String = "file:///tmp/")(implicit 
  * via services such as OGC WMS, WFS, and WCS.
  */
 trait Publish[R,S] {
-  def publish(metadata: Metadata, geo: GeoMetadata, resource: R, server: S): Future[Unit]
-  def unpublish(metadata: Metadata, geo: GeoMetadata, resource: R, server: S): Future[Unit]
+  def publish(metadata: Metadata, geo: GeoMetadata, resource: R, server: S): Unit
+  def unpublish(metadata: Metadata, geo: GeoMetadata, resource: R, server: S): Unit
 }
 
 sealed class GeoServerPublish
@@ -106,26 +104,32 @@ sealed class GeoServerPublish
       case "zipped-shapefile" => Feature
     }
 
-  def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] =
+  def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit =
     resolvePublisher(md, geo, resource, server)
       .publish(md, geo, resource, server)
 
-  def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] =
+  def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit =
     resolvePublisher(md, geo, resource, server)
       .unpublish(md, geo, resource, server)
 
-  private object Raster extends Publish[java.nio.file.Path, Server] {
-    def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = 
-      for {
-        _ <- copyFile(resource, server)
-        _ <- configure(md, geo, server)
-      } yield ()
+  private def await[T](f: Future[T]): T = Await.result(f, Duration.Inf)
 
-    def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] =
-      for {
-        _ <- unconfigure(md, geo, server)
-        _ <- deleteFile(resource, server)
-      } yield ()
+  private object Raster extends Publish[java.nio.file.Path, Server] {
+    def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit = 
+      await {
+        for {
+          _ <- copyFile(resource, server)
+          _ <- configure(md, geo, server)
+        } yield ()
+      }
+
+    def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit =
+      await {
+        for {
+          _ <- unconfigure(md, geo, server)
+          _ <- deleteFile(resource, server)
+        } yield ()
+      }
 
     private def copyFile(resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
       import scala.sys.process._
@@ -250,17 +254,21 @@ sealed class GeoServerPublish
   }
 
   private object Feature extends Publish[java.nio.file.Path, Server] {
-    def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] =
-      for {
-        _ <- copyTable(md, resource, server)
-        _ <- configure(md, geo, server)
-      } yield ()
+    def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit =
+      await {
+        for {
+          _ <- copyTable(md, resource, server)
+          _ <- configure(md, geo, server)
+        } yield ()
+      }
 
-    def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Future[Unit] = 
-      for {
-        _ <- unconfigure(md, geo, server)
-        _ <- dropTable(md, resource, server)
-      } yield ()
+    def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit = 
+      await {
+        for {
+          _ <- unconfigure(md, geo, server)
+          _ <- dropTable(md, resource, server)
+        } yield ()
+      }
 
     def copyTable(md: Metadata, resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
       import scala.collection.JavaConverters._
@@ -370,61 +378,61 @@ sealed class GeoServerPublish
  * with deployment tokens of type K
  */
 trait Track[S, K] {
-  def deploymentStarted(id: String): Future[(S, K)]
-  def deploymentSucceeded(id: K): Future[Unit]
-  def deploymentFailed(id: K): Future[Unit]
-  def undeploymentStarted(id: K): Future[Unit]
-  def undeploymentSucceeded(id: K): Future[Unit]
-  def undeploymentFailed(id: K): Future[Unit]
-  def deploymentStatus(locator: String): Future[DeployStatus]
-  def deployments(id: String): Future[Vector[S]]
-  def timedOutDeployments(): Future[Vector[(Long, String, S)]]
+  def deploymentStarted(id: String): (S, K)
+  def deploymentSucceeded(id: K): Unit
+  def deploymentFailed(id: K): Unit
+  def undeploymentStarted(id: K): Unit
+  def undeploymentSucceeded(id: K): Unit
+  def undeploymentFailed(id: K): Unit
+  def deploymentStatus(locator: String): DeployStatus
+  def deployments(id: String): Vector[S]
+  def timedOutDeployments(): Vector[(Long, String, S)]
 }
 
 sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionContext) extends Track[Server, Long] {
-  def deploymentStarted(id: String): Future[(Server, Long)] = 
-    Future { conn.startDeployment(id) }
+  def deploymentStarted(id: String): (Server, Long) = 
+    conn.startDeployment(id)
 
-  def deploymentSucceeded(id: Long): Future[Unit] = 
-    Future(conn.completeDeployment(id))
+  def deploymentSucceeded(id: Long): Unit = 
+    conn.completeDeployment(id)
 
-  def deploymentFailed(id: Long): Future[Unit] = 
-    Future(conn.failDeployment(id))
+  def deploymentFailed(id: Long): Unit = 
+    conn.failDeployment(id)
 
-  def undeploymentStarted(id: Long): Future[Unit] =
-    Future(conn.startUndeployment(id))
+  def undeploymentStarted(id: Long): Unit =
+    conn.startUndeployment(id)
 
-  def undeploymentSucceeded(id: Long): Future[Unit] =
-    Future(conn.completeUndeployment(id))
+  def undeploymentSucceeded(id: Long): Unit =
+    conn.completeUndeployment(id)
 
-  def undeploymentFailed(id: Long): Future[Unit] =
-    Future(conn.failUndeployment(id))
+  def undeploymentFailed(id: Long): Unit =
+    conn.failUndeployment(id)
 
-  def deploymentStatus(id: String): Future[DeployStatus] = 
-    Future { conn.getDeploymentStatus(id) }
+  def deploymentStatus(id: String): DeployStatus = 
+    conn.getDeploymentStatus(id)
 
-  def deployments(id: String): Future[Vector[Server]] = 
-    Future { conn.deployedServers(id) }
+  def deployments(id: String): Vector[Server] = 
+    conn.deployedServers(id)
 
-  def timedOutDeployments(): Future[Vector[(Long, String, Server)]] =
-    Future { conn.timedOutServers() }
+  def timedOutDeployments(): Vector[(Long, String, Server)] =
+    conn.timedOutServers()
 }
 
 trait Leasing {
-  def createLease(locator: String, deployToken: Long): Future[Lease]
-  def attachLease(locator: String, deployToken: Long): Future[Lease]
-  def checkDeploy(id: Long): Future[DeployStatus]
+  def createLease(locator: String, deployToken: Long, tag: Array[Byte]): Lease
+  def attachLease(locator: String, deployToken: Long, tag: Array[Byte]): Lease
+  def checkDeploy(id: Long): DeployStatus
 }
 
 sealed class PostgresLeasing(conn: java.sql.Connection)(implicit ec: ExecutionContext) extends Leasing {
-  def createLease(locator: String, deployToken: Long): Future[Lease] = 
-    Future { conn.createLease(locator, deployToken) }
+  def createLease(locator: String, deployToken: Long, tag: Array[Byte]): Lease =
+    conn.createLease(locator, deployToken, tag)
 
-  def attachLease(locator: String, deployToken: Long): Future[Lease] = 
-    Future { conn.attachLease(locator, deployToken) }
+  def attachLease(locator: String, deployToken: Long, tag: Array[Byte]): Lease =
+    conn.attachLease(locator, deployToken, tag)
 
-  def checkDeploy(id: Long): Future[DeployStatus] =
-    Future { conn.checkLeaseDeployment(id) }
+  def checkDeploy(id: Long): DeployStatus =
+    conn.checkLeaseDeployment(id)
 }
 
 /**
@@ -439,45 +447,46 @@ sealed case class Deploy[D]
    track: Track[com.radiantblue.piazza.Server, Long])
   (implicit ec: scala.concurrent.ExecutionContext)
 {
-  def attemptDeploy(locator: String): Future[(Lease, DeployStatus)] = 
-    track.deploymentStatus(locator).flatMap {
+  def attemptDeploy(locator: String, tag: Array[Byte]): Future[(Lease, DeployStatus)] = {
+    Future(track.deploymentStatus(locator)).flatMap {
       case status @ Starting(token) =>
-        for (lease <- leasing.createLease(locator, token)) yield (lease, status)
+        for (lease <- Future(leasing.createLease(locator, token, tag))) yield (lease, status)
       case status @ Live(token, _) =>
-        for (lease <- leasing.attachLease(locator, token)) yield (lease, status)
+        for (lease <- Future(leasing.attachLease(locator, token, tag))) yield (lease, status)
       case Killing | Dead => 
         for {
           token <- beginDeployment(locator)._1
-          lease <- leasing.attachLease(locator, token)
+          lease <- Future(leasing.attachLease(locator, token, tag))
         } yield (lease, Starting(token))
     }
+  }
 
   def beginDeployment(locator: String): (Future[Long], Future[Server]) = {
-    val deploymentInfo = track.deploymentStarted(locator)
+    val deploymentInfo = Future(track.deploymentStarted(locator))
     val deployment = 
       for {
         (server, token) <- deploymentInfo
-        (metadata, geometadata) <- metadataStore.lookup(locator)
-        resource <- dataStore.lookup(locator)
-        _ <- publish.publish(metadata, geometadata, resource, server)
-        _ <- track.deploymentSucceeded(token)
+        (metadata, geometadata) <- Future(metadataStore.lookup(locator))
+        resource <- Future(dataStore.lookup(locator))
+        _ <- Future(publish.publish(metadata, geometadata, resource, server))
+        _ <- Future(track.deploymentSucceeded(token))
       } yield server
     (deploymentInfo.map(_._2), deployment)
   }
 
   def checkDeploy(leaseId: Long): Future[DeployStatus] =
-    leasing.checkDeploy(leaseId)
+    Future { leasing.checkDeploy(leaseId) }
 
   def cull(): Future[Unit] = 
-    track.timedOutDeployments.flatMap { deployments =>
+    Future(track.timedOutDeployments).flatMap { deployments =>
       Future.sequence {
         for ((token, locator, server) <- deployments) yield
           for {
-            (md, geo) <- metadataStore.lookup(locator)
-            resource <- dataStore.lookup(locator)
-            _ <- track.undeploymentStarted(token).noisy
-            _ <- publish.unpublish(md, geo, resource, server).noisy
-            _ <- track.undeploymentSucceeded(token).noisy
+            (md, geo) <- Future(metadataStore.lookup(locator))
+            resource <- Future(dataStore.lookup(locator))
+            _ <- Future(track.undeploymentStarted(token))
+            _ <- Future(publish.unpublish(md, geo, resource, server))
+            _ <- Future(track.undeploymentSucceeded(token))
           } yield ()
       }.map(_ => ())
     }
@@ -516,8 +525,13 @@ object Deployer {
     val postgresConnection = Postgres("piazza.metadata.postgres").connect()
     val config = com.typesafe.config.ConfigFactory.load()
 
+    val tag = {
+      val buff = java.nio.ByteBuffer.allocate(8)
+      buff.putLong(scala.util.Random.nextLong)
+      buff.array
+    }
     val printF = 
-      for (result <- deployer(postgresConnection).attemptDeploy(locator)) yield {
+      for (result <- deployer(postgresConnection).attemptDeploy(locator, tag)) yield {
         result._2 match {
           case Starting(_) => println("Deployment in progress")
           case Live(_, server) => println(s"Deployed to server ${server.address}:${server.port}")

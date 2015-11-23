@@ -10,9 +10,7 @@ object Inspect {
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
       val upload = tuple.getValue(0).asInstanceOf[Upload]
       logger.info("Upload {}", upload)
-      import scala.concurrent.ExecutionContext.Implicits.global
-      val pathF = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.getLocator)
-      val path = scala.concurrent.Await.result(pathF, scala.concurrent.duration.Duration.Inf)
+      val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.getLocator)
       logger.info("path {}", path)
       val size = java.nio.file.Files.getAttribute(path, "size").asInstanceOf[java.lang.Long]
       logger.info("size {}", size)
