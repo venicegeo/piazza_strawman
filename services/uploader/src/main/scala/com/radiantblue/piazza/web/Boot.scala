@@ -8,10 +8,12 @@ import akka.util.Timeout
 import scala.concurrent.duration._
 
 object Boot {
+
   def main(args: Array[String]): Unit = {
     implicit val system = ActorSystem("on-spray-can")
-    val service = system.actorOf(Props[PiazzaServiceActor], "piazza-service")
     implicit val timeout = Timeout(5.seconds)
+
+    val service = system.actorOf(Props(new JobServiceActor), "job-service")
     IO(Http) ? Http.Bind(service, interface = "0.0.0.0", port = 8080)
   }
 }
