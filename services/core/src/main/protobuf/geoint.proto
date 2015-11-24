@@ -46,3 +46,62 @@ message Simplify {
     required string locator = 1;
     required double tolerance = 2;
 }
+
+message JobStatus {
+    required string id = 1;
+
+    message Pending {
+        required string serviceName = 2;
+        repeated string params = 3;
+    }
+
+    message Assigned {
+        required string node = 2;
+    }
+
+    message Started {
+        required string node = 2;
+    }
+
+    message Progress {
+        required float progress = 2;
+    }
+
+    message Done {
+        required string result = 2;
+    }
+
+    message Failed {
+        required string reason = 2;
+    }
+
+    message Aborted {
+    }
+
+    oneof state {
+        Pending pending = 2;
+        Assigned assigned = 3; 
+        Started started = 4;
+        Progress progress = 5;
+        Done done = 6;
+        Failed failed = 7;
+        Aborted aborted = 8;
+    }
+}
+
+message JobRequest {
+    message Submit {
+        required string jobId = 1;
+        required string serviceName = 2;
+        repeated string params = 3;
+    }
+
+    message Report {
+        required JobStatus status = 1;
+    }
+
+    oneof request {
+        Submit submit = 1;
+        Report report = 2;
+    }
+}
