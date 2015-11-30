@@ -1,6 +1,7 @@
 package com.radiantblue.normalizer
 
 import com.radiantblue.deployer.Deployer
+import com.radiantblue.piazza._
 import com.radiantblue.piazza.Messages._
 import com.radiantblue.piazza.postgres._
 
@@ -19,25 +20,36 @@ object Lease {
         val deployer = Deployer.deployer(postgres)
         val request = tuple.getValue(0).asInstanceOf[RequestLease]
         logger.info("Lease request: {}", request)
-        val deploymentInfoF = deployer.attemptDeploy(request.getLocator, request.getTag.toByteArray)
-        val (lease, status) = Await.result(deploymentInfoF, Duration.Inf)
-        logger.info("tag: {}", lease.tag.map(c => f"$c%02X").mkString)
-        val leases = postgres.getLeasesByDeployment(lease.deployment)
-        logger.info("Leases: {}", leases)
-        for (lease <- leases) {
-          val message = (LeaseGranted.newBuilder
-            .setLocator(request.getLocator)
-            .setTimeout(0)
-            .setTag(com.google.protobuf.ByteString.copyFrom(lease.tag))
-            .build)
-          logger.info("ltag: {}", lease.tag.map(c => f"$c%02X").mkString)
-          _collector.emit(tuple, java.util.Arrays.asList[AnyRef](message.toByteArray))
-          logger.info("Emitted {}", message)
+        val status = deployer.track.deploymentStatus(request.getLocator)
+        status match {
+          case Starting(id) =>
+            deployer.leasing.attachLease(request.getLocator, id, request.getTag.toByteArray)
+            // no message sent at this point, grant will be sent on completion
+          case Live(id, server) =>
+            deployer.leasing.attachLease(request.getLocator, id, request.getTag.toByteArray)
+            // send message to lease-grants that lease is granted
+            val message = (LeaseGranted.newBuilder
+              .setLocator(request.getLocator)
+              .setTimeout(0)
+              .setTag(request.getTag)
+              .build())
+            _collector.emit("lease-grants", tuple, java.util.Arrays.asList[AnyRef](message.toByteArray))
+          case Killing | Dead =>
+            val (server, id) = deployer.track.deploymentStarted(request.getLocator)
+            deployer.leasing.attachLease(request.getLocator, id, request.getTag.toByteArray)
+            val message = (RequestDeploy.newBuilder
+              .setLocator(request.getLocator)
+              .setServer(server)
+              .setId(id)
+              .setTag(request.getTag)
+              .build())
+            _collector.emit("deploy-requests", tuple, java.util.Arrays.asList[AnyRef](message))
         }
         _collector.ack(tuple)
       } catch {
-        case scala.util.control.NonFatal(ex) => logger.error("Error granting lease: " + ex)
-        _collector.fail(tuple)
+        case scala.util.control.NonFatal(ex) =>
+          logger.error("Error granting lease: ", ex)
+          _collector.fail(tuple)
       } finally postgres.close()
     }
 
@@ -46,7 +58,8 @@ object Lease {
     }
 
     def declareOutputFields(declarer: backtype.storm.topology.OutputFieldsDeclarer): Unit = {
-      declarer.declare(new backtype.storm.tuple.Fields("message"))
+      declarer.declareStream("lease-grants", new backtype.storm.tuple.Fields("message"))
+      declarer.declareStream("deploy-requests", new backtype.storm.tuple.Fields("message"))
     }
   }
 }

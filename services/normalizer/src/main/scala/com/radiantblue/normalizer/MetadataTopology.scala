@@ -22,8 +22,13 @@ object MetadataTopology {
       .shuffleGrouping("zipped-shapefile-metadata")
 
     builder.setSpout("lease", lease)
-    builder.setBolt("leasing", Lease.bolt).shuffleGrouping("lease")
-    builder.setBolt("publish-leases", leaseSink).shuffleGrouping("leasing")
+    builder.setBolt("leasing", Lease.bolt)
+      .shuffleGrouping("lease")
+    builder.setBolt("deploy", Deploy.bolt)
+      .shuffleGrouping("leasing", "deploy-requests")
+    builder.setBolt("publish-leases", leaseSink)
+      .shuffleGrouping("leasing", "lease-grants")
+      .shuffleGrouping("deploy")
 
     builder.setSpout("simplify-requests", simplifyRequests)
     builder.setBolt("enqueue-simplification", FeatureSimplifier.leaseBolt).shuffleGrouping("simplify-requests")

@@ -95,7 +95,7 @@ trait ProxyService extends HttpService with Proxy {
       try {
         val servers = (new com.radiantblue.deployer.PostgresTrack(conn)).deployments(id)
         val srv = servers(1 % servers.size)
-        s"http://${srv.address}:${srv.port}" : Uri
+        s"http://${srv.getHost}:${srv.getPort}" : Uri
       } finally conn.close()
     }
 

@@ -24,7 +24,9 @@ import spray.client.pipelining._
 import spray.http._, HttpMethods._
 import spray.httpx.marshalling.Marshaller
 
-import com.radiantblue.piazza._, Messages._, postgres._
+import com.radiantblue.piazza._
+import com.radiantblue.piazza.postgres._
+import com.radiantblue.piazza.Messages._
 
 trait MetadataStore {
   def lookup(locator: String): (Metadata, GeoMetadata)
@@ -82,7 +84,7 @@ sealed class GeoServerPublish
    geoserverUser: String, geoserverPassword: String,
    postgres: Postgres)
    // pgUser: String, pgPassword: String, pgHost: String, pgPort: Int, pgDatabase: String)
-  (implicit system: ActorSystem, ec: ExecutionContext) 
+  (implicit system: ActorSystem, ec: ExecutionContext)
   extends Publish[java.nio.file.Path, Server]
 {
   private implicit val timeout: Timeout = 5.seconds
@@ -115,7 +117,7 @@ sealed class GeoServerPublish
   private def await[T](f: Future[T]): T = Await.result(f, Duration.Inf)
 
   private object Raster extends Publish[java.nio.file.Path, Server] {
-    def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit = 
+    def publish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit =
       await {
         for {
           _ <- copyFile(resource, server)
@@ -140,20 +142,20 @@ sealed class GeoServerPublish
         "--perms",
         "--chmod=u+rw,g+rw,o+r",
         resource.toAbsolutePath.toString,
-        s"$sshUser@${server.address}:${server.localFilePath}")
+        s"$sshUser@${server.getHost}:${server.getLocalPath}")
       require(command.! == 0)
     }
 
     private def deleteFile(resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
       import scala.sys.process._
       val key = sshKey.toAbsolutePath.toString
-      val path = java.nio.file.Paths.get(server.localFilePath).resolve(resource.getFileName)
+      val path = java.nio.file.Paths.get(server.getLocalPath).resolve(resource.getFileName)
       val command = Vector(
         "ssh",
         "-oStrictHostKeyChecking=no",
         "-q",
         s"-i$key",
-        s"${sshUser}@${server.address}",
+        s"${sshUser}@${server.getHost}",
         "rm",
         path.toAbsolutePath.toFile.toString)
       require(command.! == 0, s"Command $command failed")
@@ -161,13 +163,13 @@ sealed class GeoServerPublish
 
     def configure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
       val id = md.getLocator
-      val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
+      val serverUri: Uri = s"http://${server.getHost}:${server.getPort}/geoserver/rest/"
       val deleteUri = (s"workspaces/piazza/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
       val storeUri = ("workspaces/piazza/coveragestores": Uri) resolvedAgainst serverUri
       val layerUri = (s"workspaces/piazza/coveragestores/${id}/coverages": Uri) resolvedAgainst serverUri
       for {
         deleteR <- pipeline(Delete(deleteUri))
-        storeR <- pipeline(Post(storeUri, 
+        storeR <- pipeline(Post(storeUri,
           storeConfig(md.getLocator, md.getName, md.getLocator)))
         _ <- Future { require(storeR.status.isSuccess, "Store creation failed") }
         layerR <- pipeline(Post(layerUri,
@@ -183,7 +185,7 @@ sealed class GeoServerPublish
 
     def unconfigure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
       val id = md.getLocator
-      val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
+      val serverUri: Uri = s"http://${server.getHost}:${server.getPort}/geoserver/rest/"
       val deleteUri = (s"workspaces/piazza/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
       for {
         deleteR <- pipeline(Delete(deleteUri))
@@ -262,7 +264,7 @@ sealed class GeoServerPublish
         } yield ()
       }
 
-    def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit = 
+    def unpublish(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Unit =
       await {
         for {
           _ <- unconfigure(md, geo, server)
@@ -312,7 +314,7 @@ sealed class GeoServerPublish
 
     def configure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
       val id = md.getLocator
-      val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
+      val serverUri: Uri = s"http://${server.getHost}:${server.getPort}/geoserver/rest/"
       val deleteUri = (s"workspaces/piazza/datastores/postgis/featuretypes/${id}?recurse=true": Uri) resolvedAgainst serverUri
       val layerUri = (s"workspaces/piazza/datastores/postgis/featuretypes": Uri) resolvedAgainst serverUri
       for {
@@ -320,21 +322,21 @@ sealed class GeoServerPublish
         layerR <- pipeline(Post(layerUri, layerConfig(md, geo)))
         _ <- if (layerR.status.isSuccess)
                Future.successful(())
-             else 
+             else
                Future.failed(new Exception("Layer creation failed: " + layerR.entity.asString))
       } yield ()
     }
 
     def unconfigure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
       val id = md.getLocator
-      val serverUri: Uri = s"http://${server.address}:${server.port}/geoserver/rest/"
+      val serverUri: Uri = s"http://${server.getHost}:${server.getPort}/geoserver/rest/"
       val deleteUri = (s"workspaces/piazza/datastores/postgis/featuretypes/${id}?recurse=true": Uri) resolvedAgainst serverUri
       for {
         deleteR <- pipeline(Delete(deleteUri))
         _ = println(deleteR)
         _ <- if (deleteR.status.isSuccess)
                Future.successful(())
-             else 
+             else
                Future.failed(new Exception("Featuretype deletion failed: " + deleteR.entity.asString))
       } yield ()
     }
@@ -390,13 +392,13 @@ trait Track[S, K] {
 }
 
 sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionContext) extends Track[Server, Long] {
-  def deploymentStarted(id: String): (Server, Long) = 
+  def deploymentStarted(id: String): (Server, Long) =
     conn.startDeployment(id)
 
-  def deploymentSucceeded(id: Long): Unit = 
+  def deploymentSucceeded(id: Long): Unit =
     conn.completeDeployment(id)
 
-  def deploymentFailed(id: Long): Unit = 
+  def deploymentFailed(id: Long): Unit =
     conn.failDeployment(id)
 
   def undeploymentStarted(id: Long): Unit =
@@ -408,10 +410,10 @@ sealed class PostgresTrack(conn: java.sql.Connection)(implicit ec: ExecutionCont
   def undeploymentFailed(id: Long): Unit =
     conn.failUndeployment(id)
 
-  def deploymentStatus(id: String): DeployStatus = 
+  def deploymentStatus(id: String): DeployStatus =
     conn.getDeploymentStatus(id)
 
-  def deployments(id: String): Vector[Server] = 
+  def deployments(id: String): Vector[Server] =
     conn.deployedServers(id)
 
   def timedOutDeployments(): Vector[(Long, String, Server)] =
@@ -442,9 +444,9 @@ sealed class PostgresLeasing(conn: java.sql.Connection)(implicit ec: ExecutionCo
 sealed case class Deploy[D]
   (metadataStore: MetadataStore,
    dataStore: DatasetStorage[D],
-   publish: Publish[D, com.radiantblue.piazza.Server],
+   publish: Publish[D, com.radiantblue.piazza.Messages.Server],
    leasing: Leasing,
-   track: Track[com.radiantblue.piazza.Server, Long])
+   track: Track[com.radiantblue.piazza.Messages.Server, Long])
   (implicit ec: scala.concurrent.ExecutionContext)
 {
   def attemptDeploy(locator: String, tag: Array[Byte]): Future[(Lease, DeployStatus)] = {
@@ -453,7 +455,7 @@ sealed case class Deploy[D]
         for (lease <- Future(leasing.createLease(locator, token, tag))) yield (lease, status)
       case status @ Live(token, _) =>
         for (lease <- Future(leasing.attachLease(locator, token, tag))) yield (lease, status)
-      case Killing | Dead => 
+      case Killing | Dead =>
         for {
           token <- beginDeployment(locator)._1
           lease <- Future(leasing.attachLease(locator, token, tag))
@@ -463,7 +465,7 @@ sealed case class Deploy[D]
 
   def beginDeployment(locator: String): (Future[Long], Future[Server]) = {
     val deploymentInfo = Future(track.deploymentStarted(locator))
-    val deployment = 
+    val deployment =
       for {
         (server, token) <- deploymentInfo
         (metadata, geometadata) <- Future(metadataStore.lookup(locator))
@@ -477,7 +479,7 @@ sealed case class Deploy[D]
   def checkDeploy(leaseId: Long): Future[DeployStatus] =
     Future { leasing.checkDeploy(leaseId) }
 
-  def cull(): Future[Unit] = 
+  def cull(): Future[Unit] =
     Future(track.timedOutDeployments).flatMap { deployments =>
       Future.sequence {
         for ((token, locator, server) <- deployments) yield
@@ -530,11 +532,11 @@ object Deployer {
       buff.putLong(scala.util.Random.nextLong)
       buff.array
     }
-    val printF = 
+    val printF =
       for (result <- deployer(postgresConnection).attemptDeploy(locator, tag)) yield {
         result._2 match {
           case Starting(_) => println("Deployment in progress")
-          case Live(_, server) => println(s"Deployed to server ${server.address}:${server.port}")
+          case Live(_, server) => println(s"Deployed to server ${server.getHost}:${server.getPort}")
           case Dead | Killing => println(s"Cannot deploy dataset with locator '$locator'")
         }
       }
@@ -543,7 +545,7 @@ object Deployer {
       println(x)
       try
         postgresConnection.close()
-      finally 
+      finally
         system.shutdown()
     }
   }
