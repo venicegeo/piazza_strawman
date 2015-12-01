@@ -15,11 +15,11 @@ import spray.httpx.SprayJsonSupport._
 
 class Attempt[T](attempt: => T) {
   private var result: Option[T] = None
-  def get: T = 
+  def get: T =
     result match {
       case Some(t) =>
         t
-      case None => 
+      case None =>
         synchronized {
           if (result == None) {
             result = Some(attempt)
@@ -58,7 +58,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
   def jdbcConnection: java.sql.Connection
   def deployer = com.radiantblue.deployer.Deployer.deployer(jdbcConnection)
 
-  private val frontendRoute = 
+  private val frontendRoute =
     path("") {
       getFromResource("com/radiantblue/piazza/web/index.html")
     } ~
@@ -69,48 +69,40 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     } ~
     getFromResourceDirectory("com/radiantblue/piazza/web")
 
-  private val datasetsApi = 
+  private val datasetsApi =
     get {
       parameters("keywords") { keywords =>
-        complete(Future { 
-          Map("results" -> jdbcConnection.keywordSearch(keywords))
-        })
+        detach() {
+          complete(
+            Map("results" -> jdbcConnection.keywordSearch(keywords)))
+        }
       }
     } ~
     post {
-      formFields("data".as[BodyPart]) { data => 
-        complete { 
-          Future {
-            val locator = (new com.radiantblue.deployer.FileSystemDatasetStorage()).store(data)
-            fireUploadEvent(data.filename.getOrElse(""), locator)
-            HttpResponse(status=StatusCodes.Found, headers=List(HttpHeaders.Location("/")))
-          }
+      formFields("data".as[BodyPart]) { data =>
+        detach() {
+          val locator = (new com.radiantblue.deployer.FileSystemDatasetStorage()).store(data)
+          fireUploadEvent(data.filename.getOrElse(""), locator)
+          redirect("/", StatusCodes.Found)
         }
       }
     }
 
   private val deploymentsApi =
-    get { 
+    get {
       parameters('dataset, 'SERVICE.?, 'VERSION.?, 'REQUEST.?) { (dataset, service, version, request) =>
-        (service, version, request) match {
-          case (Some("WMS"), Some("1.3.0"), Some("GetCapabilities")) => 
-            complete {
-              Future {
-                xml.wms_1_3_0(jdbcConnection.deploymentWithMetadata(dataset))
-              }
-            }
-          case (Some("WFS"), Some("1.0.0"), Some("GetCapabilities")) => 
-            complete {
-              Future {
-                xml.wfs_1_0_0(jdbcConnection.deploymentWithMetadata(dataset))
-              }
-            }
-          case _ =>
-            complete { 
-              Future {
-                Map("servers" -> jdbcConnection.deployedServers(dataset))
-              }
-            }
+        detach() {
+          (service, version, request) match {
+            case (Some("WMS"), Some("1.3.0"), Some("GetCapabilities")) =>
+              complete(
+                  xml.wms_1_3_0(jdbcConnection.deploymentWithMetadata(dataset)))
+            case (Some("WFS"), Some("1.0.0"), Some("GetCapabilities")) =>
+              complete(
+                  xml.wfs_1_0_0(jdbcConnection.deploymentWithMetadata(dataset)))
+            case _ =>
+              complete(
+                  Map("servers" -> jdbcConnection.deployedServers(dataset)))
+          }
         }
       }
     } ~
@@ -118,14 +110,14 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
       rawPathPrefix(Slash) {
         (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
           onComplete(awaitDeployment(dataset)) {
-            case scala.util.Success(_) => complete("Deployed")
+            case scala.util.Success(_) =>
               complete {
                 val redirectTo = uri.withQuery(Uri.Query("dataset" -> dataset))
                 HttpResponse(
                   StatusCodes.Found,
                   headers = List(HttpHeaders.Location(redirectTo)))
               }
-            case scala.util.Failure(_) => 
+            case scala.util.Failure(_) =>
               complete {
                 HttpResponse(
                   StatusCodes.BadRequest,
@@ -140,8 +132,8 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
   val listenF = Future { com.radiantblue.piazza.kafka.Kafka
     .consumer("uploader-lease-grants")
     .createMessageStreamsByFilter(kafka.consumer.Whitelist("lease-grants"))
-    .map { stream => 
-      stream.foreach { message => 
+    .map { stream =>
+      stream.foreach { message =>
         try {
           val grant = Messages.LeaseGranted.parseFrom(message.message)
           val key: Array[Byte] = grant.getTag.toByteArray
@@ -154,9 +146,9 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
         } catch {
           case scala.util.control.NonFatal(ex) => ex.printStackTrace
         }
-      } 
+      }
     }
-    ??? 
+    ???
   }
 
   private def awaitDeployment(locator: String): Future[Unit] = {
@@ -166,7 +158,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
   }
 
   private val apiRoute =
-    pathPrefix("datasets") { datasetsApi } ~ 
+    pathPrefix("datasets") { datasetsApi } ~
     pathPrefix("deployments") { deploymentsApi }
 
   def fireUploadEvent(filename: String, storageKey: String): Unit = {

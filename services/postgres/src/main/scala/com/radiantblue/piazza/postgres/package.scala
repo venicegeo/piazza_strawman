@@ -52,7 +52,7 @@ package object postgres {
 
     def keywordSearch(keyword: String): Vector[KeywordHit] = {
       val sql = """
-      SELECT 
+      SELECT
         m.name,
         m.checksum,
         m.size,
@@ -60,10 +60,10 @@ package object postgres {
         gm.native_srid,
         ST_AsGeoJson(gm.latlon_bounds),
         (select bool_or(d.state = 'live') from deployments d where d.locator = m.locator)
-      FROM metadata m 
-      LEFT JOIN geometadata gm USING (locator) 
+      FROM metadata m
+      LEFT JOIN geometadata gm USING (locator)
       WHERE name LIKE ?
-      ORDER BY m.id 
+      ORDER BY m.id
       LIMIT 10
       """
       prepare(sql) { ps =>
@@ -83,7 +83,7 @@ package object postgres {
 
     def datasetWithMetadata(locator: String): (Metadata, GeoMetadata) = {
       val sql = """
-        SELECT 
+        SELECT
           m.name,
           m.checksum,
           m.size,
@@ -97,7 +97,7 @@ package object postgres {
           ST_YMin(gm.latlon_bounds),
           ST_YMax(gm.latlon_bounds),
           gm.native_format
-        FROM metadata m JOIN geometadata gm USING (locator) 
+        FROM metadata m JOIN geometadata gm USING (locator)
         WHERE locator = ?
         LIMIT 2
       """
@@ -139,7 +139,7 @@ package object postgres {
 
     def deploymentWithMetadata(locator: String): Vector[(Metadata, GeoMetadata)] = {
       val sql = """
-        SELECT 
+        SELECT
           m.name,
           m.checksum,
           m.size,
@@ -153,7 +153,7 @@ package object postgres {
           ST_YMin(gm.latlon_bounds),
           ST_YMax(gm.latlon_bounds),
           gm.native_format
-        FROM metadata m 
+        FROM metadata m
           JOIN geometadata gm USING (locator)
           JOIN deployments d USING (locator)
         WHERE d.state = 'live'
@@ -191,50 +191,65 @@ package object postgres {
     }
 
     def deployedServers(locator: String): Vector[Server] = {
-      val sql = 
+      val sql =
         """
         SELECT s.host, s.port, s.local_path
-        FROM servers s 
+        FROM servers s
         JOIN deployments d ON (s.id = d.server)
         WHERE d.state = 'live' AND d.locator = ?
         """
       prepare(sql) { ps =>
         ps.setString(1, locator)
-        iterate(ps) { rs => Server(rs.getString(1), rs.getString(2), rs.getString(3)) }
+        iterate(ps) { rs =>
+          Server.newBuilder()
+            .setHost(rs.getString(1))
+            .setPort(rs.getInt(2))
+            .setLocalPath(rs.getString(3))
+            .build()
+        }
       }
     }
 
     def timedOutServers(): Vector[(Long, String, Server)] = {
-      val sql = 
+      val sql =
         """
         SELECT * FROM (
-          SELECT 
+          SELECT
             d.id,
             d.locator,
             s.host,
             s.port,
-            s.local_path, 
-            (SELECT max(l.lifetime) from leases l where l.deployment = d.id) lifetime 
-          FROM deployments d 
-          JOIN servers s 
-          ON (d.server = s.id) 
+            s.local_path,
+            (SELECT max(l.lifetime) from leases l where l.deployment = d.id) lifetime
+          FROM deployments d
+          JOIN servers s
+          ON (d.server = s.id)
           WHERE d.state = 'live')
         results WHERE lifetime < now()
         """
       prepare(sql) { ps =>
-        iterate(ps) { rs => (rs.getLong(1), rs.getString(2), Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))) }
+        iterate(ps) { rs => 
+          val deployId = rs.getLong(1)
+          val locator = rs.getString(2)
+          val server = Server.newBuilder()
+            .setHost(rs.getString(3))
+            .setPort(rs.getInt(4))
+            .setLocalPath(rs.getString(5))
+            .build()
+          (deployId, locator, server)
+        }
       }
     }
 
     def startDeployment(locator: String): (Server, Long) = {
-      val sql = 
+      val sql =
         """
         INSERT INTO deployments (locator, server, state)
         SELECT ?, s.id, 'starting'
         FROM servers s
         ORDER BY response_time
         LIMIT 1
-        RETURNING 
+        RETURNING
           (SELECT host FROM servers WHERE servers.id = deployments.server),
           (SELECT port FROM servers WHERE servers.id = deployments.server),
           (SELECT local_path FROM servers WHERE servers.id = deployments.server),
@@ -243,19 +258,25 @@ package object postgres {
       prepare(sql) { ps =>
         ps.setString(1, locator)
         iterate(ps)({ rs =>
-          (Server(rs.getString(1), rs.getInt(2).toString, rs.getString(3)), rs.getLong(4))
-        }).head 
+          val server = Server.newBuilder()
+            .setHost(rs.getString(1))
+            .setPort(rs.getInt(2))
+            .setLocalPath(rs.getString(3))
+            .build()
+          val deployId = rs.getLong(4)
+          (server, deployId)
+        }).head
       }
     }
 
     def completeDeployment(id: Long): Unit = {
-      val makeLive = 
+      val makeLive =
         """
-        UPDATE deployments 
+        UPDATE deployments
         SET state = 'live'
         WHERE id = ?
         """
-      val setTimeouts = 
+      val setTimeouts =
         """
         UPDATE leases SET lifetime = now() + '1 hour' WHERE lifetime IS NULL AND deployment = ?
         """
@@ -321,8 +342,12 @@ package object postgres {
           state match {
             case "starting" =>
               Starting(id)
-            case "live" => 
-              val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
+            case "live" =>
+              val server = Server.newBuilder()
+                .setHost(rs.getString(3))
+                .setPort(rs.getInt(4))
+                .setLocalPath(rs.getString(5))
+                .build()
               Live(id, server)
             case "killing" => Killing
             case "dead" => Dead
@@ -344,9 +369,9 @@ package object postgres {
 
     def insertGeoMetadata(g: GeoMetadata): Unit = {
       val sql = ("""
-      INSERT INTO geometadata (locator, native_srid, native_bounds, latlon_bounds, native_format) VALUES ( 
+      INSERT INTO geometadata (locator, native_srid, native_bounds, latlon_bounds, native_format) VALUES (
         ?,
-        ?, 
+        ?,
         ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?)),
         ST_MakeBox2D(ST_Point(?, ?), ST_Point(?, ?)),
         ?
@@ -369,7 +394,7 @@ package object postgres {
 
     def attachLease(locator: String, deployment: Long, tag: Array[Byte]): Lease = {
       val timeToLive = "1 hour";
-      val sql = 
+      val sql =
         """
         INSERT INTO leases (locator, deployment, lifetime, tag) VALUES (?, ?, now() + (? :: INTERVAL), ?) RETURNING id, lifetime
         """
@@ -383,7 +408,7 @@ package object postgres {
     }
 
     def createLease(locator: String, deployment: Long, tag: Array[Byte]): Lease = {
-      val sql = 
+      val sql =
         """
         INSERT INTO leases (locator, deployment, lifetime, tag) VALUES (?, ?, NULL, ?) RETURNING id
         """
@@ -408,7 +433,7 @@ package object postgres {
     }
 
     def getLeaseById(id: Int): (String, java.sql.Timestamp, Server) = {
-      val sql = 
+      val sql =
         """
         SELECT l.locator, l.lifetime, s.host, s.port, s.local_path
         FROM leases l
@@ -421,14 +446,18 @@ package object postgres {
         iterate(ps)({ rs =>
           val locator = rs.getString(1)
           val lifetime = rs.getTimestamp(2)
-          val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
+          val server = Server.newBuilder()
+            .setHost(rs.getString(3))
+            .setPort(rs.getInt(4))
+            .setLocalPath(rs.getString(5))
+            .build()
           (locator, lifetime, server)
         }).head
       }
     }
 
     def checkLeaseDeployment(id: Long): DeployStatus = {
-      val sql = 
+      val sql =
         """
         SELECT d.state, d.id, s.host, s.port, s.local_path
         FROM leases l
@@ -443,10 +472,14 @@ package object postgres {
           val id = rs.getInt(2)
 
           state match {
-            case "starting" => 
+            case "starting" =>
               Starting(id)
             case "live" =>
-              val server = Server(rs.getString(3), rs.getInt(4).toString, rs.getString(5))
+              val server = Server.newBuilder
+                .setHost(rs.getString(3))
+                .setPort(rs.getInt(4))
+                .setLocalPath(rs.getString(5))
+                .build()
               Live(id, server)
             case "killing" => Killing
             case "dead" => Dead
