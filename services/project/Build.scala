@@ -1,6 +1,5 @@
 import sbt._
 import Keys._
-import sbtprotobuf.{ ProtobufPlugin => PB }
 import com.typesafe.sbt.packager.archetypes.JavaAppPackaging
 import sbtassembly.AssemblyPlugin
 import spray.revolver.RevolverPlugin._
@@ -25,7 +24,6 @@ object GeoIntMessaging extends Build {
   lazy val core = project
     .disablePlugins(AssemblyPlugin)
     .settings(commonSettings: _*)
-    .settings(PB.protobufSettings: _*)
   lazy val uploader = project
     .enablePlugins(JavaAppPackaging, SbtTwirl)
     .disablePlugins(AssemblyPlugin)
