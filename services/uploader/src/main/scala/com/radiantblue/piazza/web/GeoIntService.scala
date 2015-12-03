@@ -13,6 +13,8 @@ import spray.http._
 import spray.httpx.PlayTwirlSupport._
 import spray.httpx.SprayJsonSupport._
 
+import com.radiantblue.piazza.JsonProtocol._
+
 class Attempt[T](attempt: => T) {
   private var result: Option[T] = None
   def get: T =
@@ -100,6 +102,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
               complete(
                   xml.wfs_1_0_0(jdbcConnection.deploymentWithMetadata(dataset)))
             case _ =>
+              implicitly[spray.json.RootJsonFormat[com.radiantblue.piazza.Server]]
               complete(
                   Map("servers" -> jdbcConnection.deployedServers(dataset)))
           }
@@ -128,6 +131,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
       }
     }
 
+  val parseLeaseGranted = fromJsonBytes[LeaseGranted]
   val leaseClient = new LeaseClient[Promise[Unit]](kafkaProducer)
   val listenF = Future { com.radiantblue.piazza.kafka.Kafka
     .consumer("uploader-lease-grants")
@@ -135,8 +139,8 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     .map { stream =>
       stream.foreach { message =>
         try {
-          val grant = Messages.LeaseGranted.parseFrom(message.message)
-          val key: Array[Byte] = grant.getTag.toByteArray
+          val grant = parseLeaseGranted(message.message)
+          val key: Array[Byte] = grant.tag.to[Array]
           val callback = leaseClient.retrieveContext(grant)
           for ((lease, promise) <- callback) {
             promise.success(())
@@ -161,9 +165,13 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     pathPrefix("datasets") { datasetsApi } ~
     pathPrefix("deployments") { deploymentsApi }
 
+    
   def fireUploadEvent(filename: String, storageKey: String): Unit = {
-    val upload = Messages.Upload.newBuilder().setName(filename).setLocator(storageKey).build()
-    val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", upload.toByteArray)
+    val format = toJsonBytes[Upload]
+    val upload = Upload(
+      name=filename,
+      locator=storageKey)
+    val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", format(upload))
     kafkaProducer.send(message)
   }
 
@@ -171,22 +179,22 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
 }
 
 class LeaseClient[C](val kafkaProducer: kafka.producer.Producer[String, Array[Byte]]) {
+  val format = toJsonBytes[RequestLease]
   var pending: Map[Seq[Byte], C] = Map.empty
   def requestLease(locator: String, timeout: Long, context: C): Unit = {
     val tag = leaseTag()
     synchronized {
       pending += (tag.toSeq -> context)
     }
-    val request = Messages.RequestLease.newBuilder
-      .setLocator(locator)
-      .setTimeout(timeout)
-      .setTag(com.google.protobuf.ByteString.copyFrom(tag))
-      .build()
-    sendToKafkaQueue("lease-requests", request.toByteArray)
+    val request = RequestLease(
+      locator=locator,
+      timeout=timeout,
+      tag=tag.to[Vector])
+    sendToKafkaQueue("lease-requests", format(request))
   }
 
-  def retrieveContext(grant: Messages.LeaseGranted): Option[(Lease, C)] = {
-    val key = grant.getTag.toByteArray
+  def retrieveContext(grant: LeaseGranted): Option[(Lease, C)] = {
+    val key = grant.tag.to[Array]
     val lease = Lease(0, 0, None, key) // TODO: Get lease details from Grant message
     val context = synchronized {
       val c = pending.get(key.toSeq)

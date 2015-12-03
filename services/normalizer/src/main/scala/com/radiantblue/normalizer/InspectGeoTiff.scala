@@ -1,7 +1,7 @@
 package com.radiantblue.normalizer
 
-import com.radiantblue.piazza.Messages
-
+import com.radiantblue.piazza._
+import com.radiantblue.piazza.JsonProtocol._
 import scala.collection.JavaConverters._
 
 object InspectGeoTiff {
@@ -10,14 +10,15 @@ object InspectGeoTiff {
     var _collector: backtype.storm.task.OutputCollector = _
 
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
-      val upload = tuple.getValue(0).asInstanceOf[Messages.Upload]
+      val format = toJsonBytes[GeoMetadata]
+      val upload = tuple.getValue(0).asInstanceOf[Upload]
       logger.info("Upload {}", upload)
-      val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.getLocator)
+      val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
       logger.info("path {}", path)
-      val result = InspectGeoTiff.inspect(upload.getLocator, path.toFile)
+      val result = InspectGeoTiff.inspect(upload.locator, path.toFile)
 
       result.foreach { r =>
-        _collector.emit(tuple, java.util.Arrays.asList[AnyRef](r.toByteArray))
+        _collector.emit(tuple, java.util.Arrays.asList[AnyRef](format(r)))
         logger.info("emitted")
       }
 
@@ -37,7 +38,7 @@ object InspectGeoTiff {
     locator: String,
     crs: org.opengis.referencing.crs.CoordinateReferenceSystem,
     envelope: org.opengis.geometry.BoundingBox
-  ): Messages.GeoMetadata = {
+  ): GeoMetadata = {
     import org.geotools.referencing.CRS
     val srid = CRS.lookupIdentifier(crs, true)
     val latLonEnvelope = {
@@ -46,22 +47,20 @@ object InspectGeoTiff {
       CRS.transform(tx, envelope)
     }
 
-    (Messages.GeoMetadata.newBuilder
-      .setLocator(locator)
-      .setCrsCode(srid)
-      .setNativeBoundingBox(toBoundingBox(envelope))
-      .setLatitudeLongitudeBoundingBox(toBoundingBox(latLonEnvelope))
-      .setNativeFormat("geotiff")
-      .build())
+    GeoMetadata(
+      locator=locator,
+      crsCode=srid,
+      nativeBoundingBox=toBoundingBox(envelope),
+      latitudeLongitudeBoundingBox=toBoundingBox(latLonEnvelope),
+      nativeFormat="geotiff")
   }
 
-  private def toBoundingBox(e: org.opengis.geometry.Envelope): Messages.GeoMetadata.BoundingBox = 
-    (Messages.GeoMetadata.BoundingBox.newBuilder
-      .setMinX(e.getMinimum(0))
-      .setMaxX(e.getMaximum(0))
-      .setMinY(e.getMinimum(1))
-      .setMaxY(e.getMaximum(1))
-      .build())
+  private def toBoundingBox(e: org.opengis.geometry.Envelope): Bounds =
+    Bounds(
+      minX=e.getMinimum(0),
+      maxX=e.getMaximum(0),
+      minY=e.getMinimum(1),
+      maxY=e.getMaximum(1))
 
   private def tryFindFormat(x: AnyRef): Option[org.geotools.coverage.grid.io.AbstractGridFormat] = 
     try
@@ -71,7 +70,7 @@ object InspectGeoTiff {
       case _: java.lang.UnsupportedOperationException => None
     }
 
-  def inspect(locator: String, file: java.io.File): Option[Messages.GeoMetadata] = {
+  def inspect(locator: String, file: java.io.File): Option[GeoMetadata] = {
     for (format <- tryFindFormat(file)) yield {
       val reader = format.getReader(file)
       try {

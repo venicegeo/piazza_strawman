@@ -1,6 +1,5 @@
 package com.radiantblue.piazza
 
-import com.radiantblue.piazza.Messages._
 import spray.json._
 
 package object postgres {
@@ -104,29 +103,25 @@ package object postgres {
       prepare(sql) { ps =>
         ps.setString(1, locator)
         val result = iterate(ps) { rs =>
-          val md = Metadata.newBuilder()
-            .setName(rs.getString(1))
-            .setChecksum(com.google.protobuf.ByteString.copyFrom(rs.getBytes(2)))
-            .setSize(rs.getLong(3))
-            .setLocator(locator)
-            .build()
-          val geo = GeoMetadata.newBuilder()
-            .setLocator(locator)
-            .setCrsCode(rs.getString(4))
-            .setNativeBoundingBox(Messages.GeoMetadata.BoundingBox.newBuilder()
-              .setMinX(rs.getDouble(5))
-              .setMaxX(rs.getDouble(6))
-              .setMinY(rs.getDouble(7))
-              .setMaxY(rs.getDouble(8))
-              .build())
-            .setLatitudeLongitudeBoundingBox(Messages.GeoMetadata.BoundingBox.newBuilder()
-              .setMinX(rs.getDouble(9))
-              .setMaxX(rs.getDouble(10))
-              .setMinY(rs.getDouble(11))
-              .setMaxY(rs.getDouble(12))
-              .build())
-            .setNativeFormat(rs.getString(13))
-            .build()
+          val md = Metadata(
+            name=rs.getString(1),
+            checksum=rs.getBytes(2).to[Vector],
+            size=rs.getLong(3),
+            locator=locator)
+          val geo = GeoMetadata(
+            locator=locator,
+            crsCode=rs.getString(4),
+            nativeBoundingBox=Bounds(
+              minX=rs.getDouble(5),
+              maxX=rs.getDouble(6),
+              minY=rs.getDouble(7),
+              maxY=rs.getDouble(8)),
+            latitudeLongitudeBoundingBox=Bounds(
+              minX=rs.getDouble(9),
+              maxX=rs.getDouble(10),
+              minY=rs.getDouble(11),
+              maxY=rs.getDouble(12)),
+            nativeFormat=rs.getString(13))
           (md, geo)
         }
         result match {
@@ -162,29 +157,25 @@ package object postgres {
       prepare(sql) { ps =>
         ps.setString(1, locator)
         iterate(ps)(rs => {
-            val md = Metadata.newBuilder()
-              .setName(rs.getString(1))
-              .setChecksum(com.google.protobuf.ByteString.copyFrom(rs.getBytes(2)))
-              .setSize(rs.getLong(3))
-              .setLocator(locator)
-              .build()
-            val geo = GeoMetadata.newBuilder()
-              .setLocator(locator)
-              .setCrsCode(rs.getString(4))
-              .setNativeBoundingBox(Messages.GeoMetadata.BoundingBox.newBuilder()
-                .setMinX(rs.getDouble(5))
-                .setMaxX(rs.getDouble(6))
-                .setMinY(rs.getDouble(7))
-                .setMaxY(rs.getDouble(8))
-                .build())
-              .setLatitudeLongitudeBoundingBox(Messages.GeoMetadata.BoundingBox.newBuilder()
-                .setMinX(rs.getDouble(9))
-                .setMaxX(rs.getDouble(10))
-                .setMinY(rs.getDouble(11))
-                .setMaxY(rs.getDouble(12))
-                .build())
-              .setNativeFormat(rs.getString(13))
-              .build()
+            val md = Metadata(
+              name=rs.getString(1),
+              checksum=rs.getBytes(2).to[Vector],
+              size=rs.getLong(3),
+              locator=locator)
+            val geo = GeoMetadata(
+              locator=locator,
+              crsCode=rs.getString(4),
+              nativeBoundingBox=Bounds(
+                minX=rs.getDouble(5),
+                maxX=rs.getDouble(6),
+                minY=rs.getDouble(7),
+                maxY=rs.getDouble(8)),
+              latitudeLongitudeBoundingBox=Bounds(
+                minX=rs.getDouble(9),
+                maxX=rs.getDouble(10),
+                minY=rs.getDouble(11),
+                maxY=rs.getDouble(12)),
+              nativeFormat=rs.getString(13))
             (md, geo)
         })
       }
@@ -201,11 +192,10 @@ package object postgres {
       prepare(sql) { ps =>
         ps.setString(1, locator)
         iterate(ps) { rs =>
-          Server.newBuilder()
-            .setHost(rs.getString(1))
-            .setPort(rs.getInt(2))
-            .setLocalPath(rs.getString(3))
-            .build()
+          Server(
+            host=rs.getString(1),
+            port=rs.getInt(2),
+            localPath=rs.getString(3))
         }
       }
     }
@@ -231,11 +221,10 @@ package object postgres {
         iterate(ps) { rs => 
           val deployId = rs.getLong(1)
           val locator = rs.getString(2)
-          val server = Server.newBuilder()
-            .setHost(rs.getString(3))
-            .setPort(rs.getInt(4))
-            .setLocalPath(rs.getString(5))
-            .build()
+          val server = Server(
+            host=rs.getString(3),
+            port=rs.getInt(4),
+            localPath=rs.getString(5))
           (deployId, locator, server)
         }
       }
@@ -258,11 +247,10 @@ package object postgres {
       prepare(sql) { ps =>
         ps.setString(1, locator)
         iterate(ps)({ rs =>
-          val server = Server.newBuilder()
-            .setHost(rs.getString(1))
-            .setPort(rs.getInt(2))
-            .setLocalPath(rs.getString(3))
-            .build()
+          val server = Server(
+            host=rs.getString(1),
+            port=rs.getInt(2),
+            localPath=rs.getString(3))
           val deployId = rs.getLong(4)
           (server, deployId)
         }).head
@@ -343,11 +331,10 @@ package object postgres {
             case "starting" =>
               Starting(id)
             case "live" =>
-              val server = Server.newBuilder()
-                .setHost(rs.getString(3))
-                .setPort(rs.getInt(4))
-                .setLocalPath(rs.getString(5))
-                .build()
+              val server = Server(
+                host=rs.getString(3),
+                port=rs.getInt(4),
+                localPath=rs.getString(5))
               Live(id, server)
             case "killing" => Killing
             case "dead" => Dead
@@ -359,10 +346,10 @@ package object postgres {
     def insertMetadata(md: Metadata): Unit = {
       val sql = "INSERT INTO metadata (name, locator, checksum, size) VALUES (?, ?, ?, ?)"
       prepare(sql) { ps =>
-        ps.setString(1, md.getName)
-        ps.setString(2, md.getLocator)
-        ps.setString(3, md.getChecksum.toByteArray.map(b => f"$b%02x").mkString)
-        ps.setLong(4, md.getSize)
+        ps.setString(1, md.name)
+        ps.setString(2, md.locator)
+        ps.setString(3, md.checksum.map(b => f"$b%02x").mkString)
+        ps.setLong(4, md.size)
         ps.executeUpdate()
       }
     }
@@ -377,17 +364,17 @@ package object postgres {
         ?
       ) """)
       prepare(sql) { ps =>
-        ps.setString(1, g.getLocator)
-        ps.setString(2, g.getCrsCode)
-        ps.setDouble(3, g.getNativeBoundingBox.getMinX)
-        ps.setDouble(4, g.getNativeBoundingBox.getMinY)
-        ps.setDouble(5, g.getNativeBoundingBox.getMaxX)
-        ps.setDouble(6, g.getNativeBoundingBox.getMaxY)
-        ps.setDouble(7, g.getLatitudeLongitudeBoundingBox.getMinX)
-        ps.setDouble(8, g.getLatitudeLongitudeBoundingBox.getMinY)
-        ps.setDouble(9, g.getLatitudeLongitudeBoundingBox.getMaxX)
-        ps.setDouble(10, g.getLatitudeLongitudeBoundingBox.getMaxY)
-        ps.setString(11, g.getNativeFormat)
+        ps.setString(1, g.locator)
+        ps.setString(2, g.crsCode)
+        ps.setDouble(3, g.nativeBoundingBox.minX)
+        ps.setDouble(4, g.nativeBoundingBox.minY)
+        ps.setDouble(5, g.nativeBoundingBox.maxX)
+        ps.setDouble(6, g.nativeBoundingBox.maxY)
+        ps.setDouble(7, g.latitudeLongitudeBoundingBox.minX)
+        ps.setDouble(8, g.latitudeLongitudeBoundingBox.minY)
+        ps.setDouble(9, g.latitudeLongitudeBoundingBox.maxX)
+        ps.setDouble(10, g.latitudeLongitudeBoundingBox.maxY)
+        ps.setString(11, g.nativeFormat)
         ps.executeUpdate()
       }
     }
@@ -446,11 +433,10 @@ package object postgres {
         iterate(ps)({ rs =>
           val locator = rs.getString(1)
           val lifetime = rs.getTimestamp(2)
-          val server = Server.newBuilder()
-            .setHost(rs.getString(3))
-            .setPort(rs.getInt(4))
-            .setLocalPath(rs.getString(5))
-            .build()
+          val server = Server(
+            host=rs.getString(3),
+            port=rs.getInt(4),
+            localPath=rs.getString(5))
           (locator, lifetime, server)
         }).head
       }
@@ -475,11 +461,10 @@ package object postgres {
             case "starting" =>
               Starting(id)
             case "live" =>
-              val server = Server.newBuilder
-                .setHost(rs.getString(3))
-                .setPort(rs.getInt(4))
-                .setLocalPath(rs.getString(5))
-                .build()
+              val server = Server(
+                host=rs.getString(3),
+                port=rs.getInt(4),
+                localPath=rs.getString(5))
               Live(id, server)
             case "killing" => Killing
             case "dead" => Dead

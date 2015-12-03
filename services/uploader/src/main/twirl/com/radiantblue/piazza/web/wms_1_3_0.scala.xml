@@ -1,4 +1,4 @@
-@import com.radiantblue.piazza.Messages._
+@import com.radiantblue.piazza._
 @(layers: Vector[(Metadata, GeoMetadata)])<?xml version="1.0" encoding="UTF-8"?>
 <WMS_Capabilities version="1.3.0" updateSequence="78" xmlns="http://www.opengis.net/wms" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.opengis.net/wms http://192.168.23.13:8080/geoserver/schemas/wms/1.3.0/capabilities_1_3_0.xsd">
   <Service>
@@ -101,7 +101,7 @@
       <CRS>CRS:84</CRS>
       <CRS>EPSG:4326</CRS>
       <CRS>EPSG:3857</CRS>
-      @for(crs <- layers.map(_._2.getCrsCode).distinct) {
+      @for(crs <- layers.map(_._2.crsCode).distinct) {
           <CRS>@crs</CRS>
       }
       <EX_GeographicBoundingBox>
@@ -113,19 +113,19 @@
       <BoundingBox CRS="CRS:84" minx="-180.0" miny="-90.0" maxx="180.0" maxy="90.0"/>
       @for((md, geo) <- layers) {
           <Layer queryable="1">
-            <Name>@md.getLocator</Name>
-            <Title>@md.getName</Title>
+            <Name>@md.locator</Name>
+            <Title>@md.name</Title>
             <Abstract></Abstract>
-            <CRS>@geo.getCrsCode</CRS>
+            <CRS>@geo.crsCode</CRS>
             <CRS>CRS:84</CRS>
             <EX_GeographicBoundingBox>
-              <westBoundLongitude>@geo.getLatitudeLongitudeBoundingBox.getMinX</westBoundLongitude>
-              <eastBoundLongitude>@geo.getLatitudeLongitudeBoundingBox.getMaxX</eastBoundLongitude>
-              <southBoundLatitude>@geo.getLatitudeLongitudeBoundingBox.getMinY</southBoundLatitude>
-              <northBoundLatitude>@geo.getLatitudeLongitudeBoundingBox.getMaxY</northBoundLatitude>
+              <westBoundLongitude>@geo.latitudeLongitudeBoundingBox.minX</westBoundLongitude>
+              <eastBoundLongitude>@geo.latitudeLongitudeBoundingBox.maxX</eastBoundLongitude>
+              <southBoundLatitude>@geo.latitudeLongitudeBoundingBox.minY</southBoundLatitude>
+              <northBoundLatitude>@geo.latitudeLongitudeBoundingBox.maxY</northBoundLatitude>
             </EX_GeographicBoundingBox>
-            <BoundingBox CRS="CRS:84" minx="@geo.getLatitudeLongitudeBoundingBox.getMinX" miny="@geo.getLatitudeLongitudeBoundingBox.getMinY" maxx="@geo.getLatitudeLongitudeBoundingBox.getMaxX" maxy="@geo.getLatitudeLongitudeBoundingBox.getMaxY"/>
-            <BoundingBox CRS="@geo.getCrsCode" minx="@geo.getNativeBoundingBox.getMinY" miny="@geo.getNativeBoundingBox.getMinX" maxx="@geo.getNativeBoundingBox.getMaxY" maxy="@geo.getNativeBoundingBox.getMaxX"/>
+            <BoundingBox CRS="CRS:84" minx="@geo.latitudeLongitudeBoundingBox.minX" miny="@geo.latitudeLongitudeBoundingBox.minY" maxx="@geo.latitudeLongitudeBoundingBox.maxX" maxy="@geo.latitudeLongitudeBoundingBox.maxY"/>
+            <BoundingBox CRS="@geo.crsCode" minx="@geo.nativeBoundingBox.minY" miny="@geo.nativeBoundingBox.minX" maxx="@geo.nativeBoundingBox.maxY" maxy="@geo.nativeBoundingBox.maxX"/>
           </Layer>
       }
     </Layer>

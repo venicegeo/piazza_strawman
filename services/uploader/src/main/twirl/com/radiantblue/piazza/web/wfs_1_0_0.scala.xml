@@ -1,4 +1,4 @@
-@import com.radiantblue.piazza.Messages._
+@import com.radiantblue.piazza._
 @(layers: Vector[(Metadata, GeoMetadata)])<?xml version="1.0" encoding="UTF-8"?>
 <WFS_Capabilities xmlns="http://www.opengis.net/wfs" xmlns:piazza="http://radiantblue.com/piazza/" xmlns:ogc="http://www.opengis.net/ogc" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.0.0" xsi:schemaLocation="http://www.opengis.net/wfs http://192.168.23.13:8080/geoserver/schemas/wfs/1.0.0/WFS-capabilities.xsd">
   <Service>
@@ -116,12 +116,12 @@ data.
     </Operations>
     @for((md, geo) <- layers) {
     <FeatureType>
-      <Name>piazza:@md.getLocator</Name>
-      <Title>@md.getName</Title>
+      <Name>piazza:@md.locator</Name>
+      <Title>@md.name</Title>
       <Abstract/>
       <Keywords>features, states.zip</Keywords>
-      <SRS>@geo.getCrsCode</SRS>
-      <LatLongBoundingBox minx="@geo.getLatitudeLongitudeBoundingBox.getMinX" miny="@geo.getLatitudeLongitudeBoundingBox.getMinY" maxx="@geo.getLatitudeLongitudeBoundingBox.getMaxX" maxy="@geo.getLatitudeLongitudeBoundingBox.getMaxY"/>
+      <SRS>@geo.crsCode</SRS>
+      <LatLongBoundingBox minx="@geo.latitudeLongitudeBoundingBox.minX" miny="@geo.latitudeLongitudeBoundingBox.minY" maxx="@geo.latitudeLongitudeBoundingBox.maxX" maxy="@geo.latitudeLongitudeBoundingBox.maxY"/>
     </FeatureType>
     }
   </FeatureTypeList>

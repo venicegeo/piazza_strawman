@@ -26,10 +26,10 @@ trait Proxy {
   private def stripHostHeader(headers: List[HttpHeader]) =
     headers filterNot (_ is HttpHeaders.Host.lowercaseName)
 
-  private val updateUriUnmatchedPath = 
+  private val updateUriUnmatchedPath =
     (ctx: RequestContext, uri: Uri) => uri.withPath(uri.path ++ ctx.unmatchedPath)
 
-  private val updateUriAuthority = 
+  private val updateUriAuthority =
     (ctx: RequestContext, uri: Uri) => ctx.request.uri.withAuthority(uri.authority)
 
   def updateRequest(uri: Uri, updateUri: (RequestContext, Uri) => Uri): RequestContext => HttpRequest =
@@ -54,9 +54,9 @@ trait ProxyService extends HttpService with Proxy {
   implicit def futureContext: ExecutionContext
   implicit def system: ActorSystem
 
-  def caseFoldedParameter(name: String): Directive1[String] = 
+  def caseFoldedParameter(name: String): Directive1[String] =
     parameterSeq.flatMap { params =>
-      val lastMatch = 
+      val lastMatch =
         params.foldLeft(None: Option[String]) { (acc, el) =>
           if (el._1 equalsIgnoreCase name)
             Some(el._2)
@@ -95,13 +95,13 @@ trait ProxyService extends HttpService with Proxy {
       try {
         val servers = (new com.radiantblue.deployer.PostgresTrack(conn)).deployments(id)
         val srv = servers(1 % servers.size)
-        s"http://${srv.getHost}:${srv.getPort}" : Uri
+        s"http://${srv.host}:${srv.port}" : Uri
       } finally conn.close()
     }
 
-  def proxyRoute: Route = 
-    logRequestResponse("test") { 
-      pathPrefix("geoserver") { 
+  def proxyRoute: Route =
+    logRequestResponse("test") {
+      pathPrefix("geoserver") {
         getFromResourceDirectory("com/radiantblue/ogcproxy/web") ~
         datasetId { layer =>
           val id = layer.replaceFirst("^piazza:", "")

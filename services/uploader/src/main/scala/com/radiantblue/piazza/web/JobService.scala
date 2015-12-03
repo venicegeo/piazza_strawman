@@ -6,14 +6,13 @@ import spray.routing._
 import spray.http._
 import spray.httpx.SprayJsonSupport._
 import spray.json._
-import com.radiantblue.piazza.Messages._
+import com.radiantblue.piazza.{ kafka => _, _ }
 
 class JobServiceActor(
   val requests: Bus[JobRequest],
   val statuses: Bus[JobStatus],
   val registry: Map[String, (Bus[JobRequest], Bus[JobStatus])]
 ) extends Actor with JobService {
-  import JobLifecycle.report
   def actorRefFactory = context
   def executionContext = context.dispatcher
   val manager = new MemoryManager(requests, statuses, registry)
@@ -22,7 +21,6 @@ class JobServiceActor(
 }
 
 trait JobService extends HttpService with JobJsonProtocol {
-  import JobLifecycle.submit
   implicit def executionContext: scala.concurrent.ExecutionContext
   def requests: Bus[JobRequest]
   def statuses: Bus[JobStatus]
@@ -39,7 +37,7 @@ trait JobService extends HttpService with JobJsonProtocol {
         entity(as[Task]) { task =>
           detach() {
             val jobId = manager.nextId
-            requests.post(submit(jobId, task))
+            requests.post(Submit(jobId, task.service, task.parameters))
             redirect(s"/jobs/$jobId", StatusCodes.Found)
           }
         }
@@ -48,58 +46,70 @@ trait JobService extends HttpService with JobJsonProtocol {
 }
 
 trait JobJsonProtocol extends DefaultJsonProtocol {
-  import JobLifecycle.{ pending, assigned, started, progress, done, failed, aborted }
   implicit val statusFormat: RootJsonFormat[JobStatus] = new RootJsonFormat[JobStatus] {
-    def read(json: JsValue): JobStatus =
-      json.asJsObject.getFields("status", "id") match {
+    def read(json: JsValue): JobStatus = {
+      val obj = json.asJsObject
+      obj.getFields("status", "id") match {
         case Seq(JsString("pending"), JsString(id)) =>
-          val Seq(task) = json.asJsObject.getFields("task")
-          pending(id, task.convertTo[Task])
-        case Seq(JsString("assigned"), JsString(id)) => assigned(id)
-        case Seq(JsString("started"), JsString(id)) => started(id)
-        case Seq(JsString("progress"), JsString(id)) => progress(id)
+          val task = obj.fields("task").convertTo[Task]
+          Pending(id, task.service, task.parameters)
+        case Seq(JsString("assigned"), JsString(id)) =>
+          val node = obj.fields("node").convertTo[String]
+          Assigned(id, node)
+        case Seq(JsString("started"), JsString(id)) =>
+          val node = obj.fields("node").convertTo[String]
+          Started(id, node)
+        case Seq(JsString("progress"), JsString(id)) =>
+          val progress = obj.fields("progress").convertTo[Float]
+          Progress(id, progress)
         case Seq(JsString("done"), JsString(id)) =>
-          val Seq(result) = json.asJsObject.getFields("result")
-          done(id, result.convertTo[String])
-        case Seq(JsString("failed"), JsString(id)) => failed(id)
-        case Seq(JsString("aborted"), JsString(id)) => aborted(id)
+          val result = obj.fields("result").convertTo[String]
+          Done(id, result)
+        case Seq(JsString("failed"), JsString(id)) =>
+          val reason = obj.fields("reason").convertTo[String]
+          Failed(id, reason)
+        case Seq(JsString("aborted"), JsString(id)) =>
+          Aborted(id)
         case _ => throw new DeserializationException("not a valid status")
       }
+    }
 
     def write(status: JobStatus): JsValue =
-      if (status.hasPending) {
-        val task = Task(status.getPending.getServiceName, status.getPending.getParamsList.asScala.to[Vector])
-        JsObject(
-          "id" -> JsString(status.getId),
-          "status" -> JsString("pending"),
-          "task" -> task.toJson)
-      } else if (status.hasAssigned) {
-        JsObject(
-          "id" -> JsString(status.getId),
-          "status" -> JsString("assigned"))
-      } else if (status.hasStarted) {
-        JsObject(
-          "id" -> JsString(status.getId),
-          "status" -> JsString("started"))
-      } else if (status.hasProgress) {
-        JsObject(
-          "id" -> JsString(status.getId),
-          "status" -> JsString("progress"))
-      } else if (status.hasDone) {
-        JsObject(
-          "id" -> JsString(status.getId),
-          "status" -> JsString("done"),
-          "result" -> JsString(status.getDone.getResult))
-      } else if (status.hasFailed) {
-        JsObject(
-          "id" -> JsString(status.getId),
-          "status" -> JsString("failed"))
-      } else if (status.hasAborted) {
-        JsObject(
-          "id" -> JsString(status.getId),
-          "status" -> JsString("aborted"))
-      } else {
-        throw new IllegalStateException(s"Unsupported JobStatusstatus")
+      status match {
+        case Pending(id, serviceName, parameters) =>
+          JsObject(
+            "id" -> id.toJson,
+            "status" -> "pending".toJson,
+            "task" -> Task(serviceName, parameters).toJson)
+        case Assigned(id, node) =>
+          JsObject(
+            "id" -> id.toJson,
+            "status" -> "assigned".toJson,
+            "node" -> node.toJson)
+        case Started(id, node) =>
+          JsObject(
+            "id" -> id.toJson,
+            "status" -> "started".toJson,
+            "node" -> node.toJson)
+        case Progress(id, progress) =>
+          JsObject(
+            "id" -> id.toJson,
+            "status" -> "progress".toJson,
+            "progress" -> progress.toJson)
+        case Done(id, result) =>
+          JsObject(
+            "id" -> id.toJson,
+            "status" -> "done".toJson,
+            "result" -> result.toJson)
+        case Failed(id, reason) =>
+          JsObject(
+            "id" -> id.toJson,
+            "status" -> "failed".toJson,
+            "reason" -> reason.toJson)
+        case Aborted(id) =>
+          JsObject(
+            "id" -> id.toJson,
+            "status" -> "aborted".toJson)
       }
   }
 
@@ -110,91 +120,17 @@ sealed case class Task(service: String, parameters: Vector[String])
 
 object JobLifecycle {
   def canAdvanceTo(oldStatus: JobStatus, newStatus: JobStatus): Boolean = {
-    if (oldStatus.getId != newStatus.getId)
+    if (oldStatus.id != newStatus.id)
       false
-    else if (oldStatus.hasPending)
-      newStatus.hasAssigned || newStatus.hasAborted
-    else if (oldStatus.hasAssigned)
-      newStatus.hasStarted || newStatus.hasAborted
-    else if (oldStatus.hasStarted)
-      newStatus.hasProgress || newStatus.hasDone || newStatus.hasFailed
-    else if (oldStatus.hasProgress)
-      newStatus.hasProgress || newStatus.hasDone || newStatus.hasFailed
-    else false
+    else
+      (oldStatus, newStatus) match {
+        case (Pending(_, _, _), Assigned(_, _) | Aborted(_)) => true
+        case (Assigned(_, _), Started(_, _) | Aborted(_)) => true
+        case (Started(_, _), Progress(_, _) | Done(_, _) | Failed(_, _)) => true
+        case (Progress(_, _), Progress(_, _) | Done(_, _) | Failed(_, _)) => true
+        case _ => false
+      }
   }
-
-  def pending(id: String, task: Task): JobStatus =
-    JobStatus.newBuilder()
-      .setPending(JobStatus.Pending.newBuilder()
-        .setServiceName(task.service)
-        .addAllParams(task.parameters.asJava)
-        .build())
-      .setId(id)
-      .build()
-
-  def assigned(id: String): JobStatus =
-    JobStatus.newBuilder()
-      .setAssigned(JobStatus.Assigned.newBuilder()
-        .setNode("")
-        .build())
-      .setId(id)
-      .build()
-
-  def started(id: String): JobStatus =
-    JobStatus.newBuilder()
-      .setStarted(JobStatus.Started.newBuilder()
-        .setNode("")
-        .build())
-      .setId(id)
-      .build()
-
-  def progress(id: String): JobStatus =
-    JobStatus.newBuilder()
-      .setProgress(JobStatus.Progress.newBuilder()
-        .setProgress(.5f)
-        .build())
-      .setId(id)
-      .build()
-
-  def done(id: String, result: String): JobStatus =
-    JobStatus.newBuilder()
-      .setDone(JobStatus.Done.newBuilder()
-        .setResult(result)
-        .build())
-      .setId(id)
-      .build()
-
-  def failed(id: String): JobStatus =
-    JobStatus.newBuilder()
-      .setFailed(JobStatus.Failed.newBuilder()
-        .setReason("Bye")
-        .build())
-      .setId(id)
-      .build()
-
-  def aborted(id: String): JobStatus =
-    JobStatus.newBuilder()
-      .setAborted(JobStatus.Aborted.newBuilder()
-        .build())
-      .setId(id)
-      .build()
-
-
-  def submit(id: String, task: Task): JobRequest =
-    JobRequest.newBuilder()
-      .setSubmit(JobRequest.Submit.newBuilder()
-        .setJobId(id)
-        .setServiceName(task.service)
-        .addAllParams(task.parameters.asJava)
-        .build())
-      .build()
-
-  def report(status: JobStatus): JobRequest =
-    JobRequest.newBuilder()
-      .setReport(JobRequest.Report.newBuilder()
-        .setStatus(status)
-        .build())
-      .build()
 }
 
 trait Bus[M] {
@@ -219,8 +155,8 @@ object Bus {
     }
 
   def onKafka[M](queueName: String,
-    encode: M => (Option[String], Array[Byte]),
-    decode: kafka.message.MessageAndMetadata[String, Array[Byte]] => M,
+    encode: M => Array[Byte],
+    decode: Array[Byte] => M,
     executorService: java.util.concurrent.ExecutorService)
   : Bus[M] =
     new Bus[M] {
@@ -239,7 +175,7 @@ object Bus {
             executorService.submit(new java.util.concurrent.Callable[Unit] {
               def call() = {
                 for (message <- stream) {
-                  val m = decode(message)
+                  val m = decode(message.message)
                   subscribers.foreach { sub =>
                     executorService.submit(new java.util.concurrent.Callable[Unit] {
                       def call() = sub(m)
@@ -252,8 +188,8 @@ object Bus {
       }
 
       def post(m: M) = {
-        val (key, message) = encode(m)
-        val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]](queueName, key.orNull, message)
+        val message = encode(m)
+        val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]](queueName, null, message)
         producer.send(keyedMessage)
       }
 
@@ -272,7 +208,6 @@ final class MemoryManager(
   statuses: Bus[JobStatus],
   registry: Map[String, (Bus[JobRequest], Bus[JobStatus])])
 extends Manager {
-  import JobLifecycle.pending
   private var counter = 0
   private var state = Map.empty[String, JobStatus]
   private var issuedIds = Set.empty[String]
@@ -286,59 +221,25 @@ extends Manager {
 
   private def request(r: JobRequest): Unit =
     synchronized {
-      if (r.hasSubmit) {
-        val id = r.getSubmit.getJobId
-        val task = Task(r.getSubmit.getServiceName, r.getSubmit.getParamsList.asScala.to[Vector])
-        if (issuedIds(id)) {
-          val (req, stat) = registry(task.service)
-          req.post(r)
-          val status = pending(id, task)
-          state += (id -> status)
-          issuedIds -= id
-          statuses.post(status)
-        }
-      } else if (r.hasReport) {
-        val newStatus = r.getReport.getStatus
-        for (oldStatus <- state.get(newStatus.getId) if JobLifecycle.canAdvanceTo(oldStatus, newStatus)) {
-          state += (newStatus.getId -> newStatus)
-          statuses.post(newStatus)
-        }
+      r match {
+        case Submit(id, service, parameters) =>
+          if (issuedIds(id)) {
+            val (req, stat) = registry(service)
+            req.post(r)
+            val status = Pending(id, service, parameters)
+            state += (id -> status)
+            issuedIds -= id
+            statuses.post(status)
+          }
+        case Report(newStatus) =>
+          for (oldStatus <- state.get(newStatus.id) if JobLifecycle.canAdvanceTo(oldStatus, newStatus)) {
+            state += (newStatus.id -> newStatus)
+            statuses.post(newStatus)
+          }
       }
     }
 
   def check(jobId: String): JobStatus = state(jobId)
-}
-
-trait Router {
-  def bus[T <: com.google.protobuf.GeneratedMessage]
-    (name: String)
-    (decode: Array[Byte] => T)
-  : Bus[T]
-
-  def keyedBus[T <: com.google.protobuf.GeneratedMessage]
-    (name: String)
-    (key: T => String, decode: Array[Byte] => T)
-  : Bus[T]
-}
-
-class InProcessRouter {
-  private var lookup = Map.empty[String, Bus[_]]
-
-  def bus[T <: com.google.protobuf.GeneratedMessage]
-    (name: String)
-    (decode: Array[Byte] => T)
-  : Bus[T] =
-    lookup.get(name).map(_.asInstanceOf[Bus[T]]).getOrElse {
-      val bus = Bus.of[T]
-      lookup += (name -> bus)
-      bus
-    }
-
-  def keyedBus[T <: com.google.protobuf.GeneratedMessage]
-    (name: String)
-    (key: T => String, decode: Array[Byte] => T)
-  : Bus[T]
-  = bus(name)(decode)
 }
 
 trait Worker {
@@ -346,21 +247,17 @@ trait Worker {
 }
 
 final class SimplifyWorker(statuses: Bus[JobStatus]) extends Worker {
-  import JobLifecycle.{ assigned, started, progress, done }
   def submit(id: String, task: Task): Unit = {
     try {
-      statuses.post(assigned(id))
-      statuses.post(started(id))
+      statuses.post(Assigned(id, "node"))
+      statuses.post(Started(id, "node"))
       Thread.sleep(5000) // Pretend to do a lot of work
-      statuses.post(progress(id))
+      statuses.post(Progress(id, .5))
       Thread.sleep(5000) // Continue work
-      statuses.post(done(id, "hi"))
+      statuses.post(Done(id, "hi"))
     } catch {
-      case scala.util.control.NonFatal(_) =>
-        val message = JobStatus.newBuilder
-          .setFailed(JobStatus.Failed.newBuilder.build())
-          .setId(id)
-          .build()
+      case scala.util.control.NonFatal(ex) =>
+        val message: JobStatus = Failed(id = id, reason = ex.getMessage)
         statuses.post(message)
     }
   }

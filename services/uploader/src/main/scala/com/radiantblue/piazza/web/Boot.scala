@@ -1,6 +1,6 @@
 package com.radiantblue.piazza.web
 
-import com.radiantblue.piazza.Messages._
+import com.radiantblue.piazza.{ kafka => _, _ }
 import akka.actor.{ ActorSystem, Props }
 import akka.io.IO
 import spray.can.Http
@@ -9,61 +9,44 @@ import akka.util.Timeout
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 
+import spray.json._
+import com.radiantblue.piazza.JsonProtocol._
+
 object Boot {
-  val encodeJobRequest: JobRequest => (Option[String], Array[Byte]) =
-    request => {
-      val id =
-        if (request.hasSubmit)
-          request.getSubmit.getJobId
-        else if (request.hasReport)
-          request.getReport.getStatus.getId
-        else
-          throw new IllegalStateException(s"Unknown job request type $request")
-      (Some(id), request.toByteArray)
-    }
-
-  val decodeJobRequest: kafka.message.MessageAndMetadata[String, Array[Byte]] => JobRequest =
-    message => JobRequest.parseFrom(message.message)
-
-  val encodeJobStatus: JobStatus => (Option[String], Array[Byte]) =
-    request => (Some(request.getId), request.toByteArray)
-
-  val decodeJobStatus: kafka.message.MessageAndMetadata[String, Array[Byte]] => JobStatus =
-    message => JobStatus.parseFrom(message.message)
-
   def setupJobService() {
     val executorService: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newCachedThreadPool()
     val requests = Bus.onKafka[JobRequest](
       "job-request",
-      encodeJobRequest,
-      decodeJobRequest,
+      toJsonBytes[JobRequest],
+      fromJsonBytes[JobRequest],
       executorService)
     val statuses = Bus.onKafka[JobStatus](
       "job-status",
-      encodeJobStatus,
-      decodeJobStatus,
+      toJsonBytes[JobStatus],
+      fromJsonBytes[JobStatus],
       executorService)
 
     val simplify = {
       val request = Bus.onKafka[JobRequest](
         "simplify-job-request",
-        encodeJobRequest,
-        decodeJobRequest,
+        toJsonBytes[JobRequest],
+        fromJsonBytes[JobRequest],
         executorService)
       val report = Bus.onKafka[JobStatus](
         "simplify-job-status",
-        encodeJobStatus,
-        decodeJobStatus,
+        toJsonBytes[JobStatus],
+        fromJsonBytes[JobStatus],
         executorService)
       val worker = new SimplifyWorker(report)
       request.subscribe { jobRequest =>
-        if (jobRequest.hasSubmit) {
-          val t = jobRequest.getSubmit
-          val task = Task(t.getServiceName, t.getParamsList.asScala.to[Vector])
-          worker.submit(jobRequest.getSubmit.getJobId, task)
+        jobRequest match {
+          case Submit(id, service, parameters) =>
+            val task = Task(service, parameters)
+            worker.submit(id, task)
+          case _ =>
         }
       }
-      report.subscribe(status => requests.post(JobLifecycle.report(status)))
+      report.subscribe(status => requests.post(Report(status)))
       (request, report)
     }
     val registry = Map("simplify" -> simplify)

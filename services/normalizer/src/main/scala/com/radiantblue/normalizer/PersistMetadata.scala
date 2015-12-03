@@ -2,7 +2,8 @@ package com.radiantblue.normalizer
 
 import scala.collection.JavaConverters._
 import com.radiantblue.normalizer.mapper._
-import com.radiantblue.piazza.Messages
+import com.radiantblue.piazza._
+import com.radiantblue.piazza.JsonProtocol._
 import com.radiantblue.piazza.postgres._
 
 object Persist {
@@ -16,11 +17,13 @@ object Persist {
       // (slow!)
       val conn = Postgres("piazza.metadata.postgres").connect()
       try {
-        tuple.getValue(0) match {
-          case metadata: Messages.Metadata => conn.insertMetadata(metadata)
-          case geoMetadata: Messages.GeoMetadata => conn.insertGeoMetadata(geoMetadata)
+        tuple.getValue(0).asInstanceOf[Either[Metadata,GeoMetadata]] match {
+          case Left(metadata) => conn.insertMetadata(metadata)
+          case Right(geoMetadata) => conn.insertGeoMetadata(geoMetadata)
         }
         _collector.ack(tuple)
+      } catch {
+        case scala.util.control.NonFatal(ex) => _collector.fail(tuple)
       } finally {
         conn.close()
       }
@@ -39,8 +42,8 @@ object Persist {
 object PersistTopology {
   def main(args: Array[String]): Unit = {
     java.lang.Class.forName("org.postgresql.Driver")
-      
-    val kafkaSpout = Kafka.spoutForTopic("metadata", MetadataScheme) 
+
+    val kafkaSpout = Kafka.spoutForTopic("metadata", JsonScheme.Metadatas)
 
     val builder = new backtype.storm.topology.TopologyBuilder
     builder.setSpout("metadata", kafkaSpout)

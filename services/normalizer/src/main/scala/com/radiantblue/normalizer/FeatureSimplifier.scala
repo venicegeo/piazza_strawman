@@ -2,7 +2,9 @@ package com.radiantblue.normalizer
 
 import scala.collection.JavaConverters._
 import com.vividsolutions.jts.simplify.DouglasPeuckerSimplifier.simplify
-import com.radiantblue.piazza.Messages._
+import com.radiantblue.piazza.{ kafka => _, _}
+import spray.json._
+import JsonProtocol._
 
 object FeatureSimplifier {
   val leaseBolt: backtype.storm.topology.IRichBolt = new backtype.storm.topology.base.BaseRichBolt {
@@ -10,8 +12,8 @@ object FeatureSimplifier {
     var _collector: backtype.storm.task.OutputCollector = _
 
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
-      val simplify = tuple.getValue(0).asInstanceOf[Simplify]
-      receiveJob(simplify.getLocator, simplify.getTolerance)
+      val simplify = tuple.getValue(0).asInstanceOf[RequestSimplify]
+      receiveJob(simplify.locator, simplify.tolerance)
       logger.info("Simplify {}", simplify)
       _collector.ack(tuple)
     }
@@ -104,25 +106,23 @@ object FeatureSimplifier {
   private def getResultFile: java.io.File =
     java.nio.file.Files.createTempDirectory("feature-simplifier-work").toFile
   private def requestLease(locator: String, timeout: Long, tag: Array[Byte]): Unit = {
-    val message = RequestLease.newBuilder()
-      .setLocator(locator)
-      .setTimeout(timeout)
-      .setTag(com.google.protobuf.ByteString.copyFrom(tag))
-      .build()
-    val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("lease-requests", message.toByteArray)
+    val message = RequestLease(
+      locator=locator,
+      timeout=timeout,
+      tag=tag.to[Vector])
+    val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("lease-requests", message.toJson.compactPrint.getBytes("utf-8"))
     producer.send(keyedMessage)
   }
 
-  private def wfsUrl(g: com.radiantblue.piazza.Messages.LeaseGranted): java.net.URL = 
+  private def wfsUrl(g: LeaseGranted): java.net.URL = 
     new java.net.URL(
-      s"http://192.168.23.11:8080/api/deployments?dataset=${g.getLocator}&SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities")
+      s"http://192.168.23.11:8080/api/deployments?dataset=${g.locator}&SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities")
 
   private def publish(file: java.io.File): Unit = {
-    val message = Upload.newBuilder()
-      .setLocator(file.getAbsolutePath)
-      .setName("simplify-result")
-      .build()
-    val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", message.toByteArray)
+    val message = Upload(
+      locator=file.getAbsolutePath,
+      name="simplify-result")
+    val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", message.toJson.compactPrint.getBytes("utf-8"))
     producer.send(keyedMessage)
   }
 
@@ -161,8 +161,8 @@ object FeatureSimplifier {
     requestLease(locator, 60 * 60 * 1000, tag)
   }
 
-  def receiveLease(g: com.radiantblue.piazza.Messages.LeaseGranted): Unit = {
-    val key = g.getTag.toByteArray
+  def receiveLease(g: LeaseGranted): Unit = {
+    val key = g.tag.to[Array]
     val ctx = synchronized {
       val result = context.get(key.toSeq)
       context -= key.toSeq

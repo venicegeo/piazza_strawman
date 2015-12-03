@@ -1,7 +1,7 @@
 package piazza;
 
 option java_package = "com.radiantblue.piazza";
-option java_outer_classname = "Messages";
+option java_outer_classname = "Schmessages";
 
 message Upload {
     required string name = 1;

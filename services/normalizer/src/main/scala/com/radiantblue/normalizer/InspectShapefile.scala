@@ -1,6 +1,7 @@
 package com.radiantblue.normalizer
 
-import com.radiantblue.piazza.Messages._
+import com.radiantblue.piazza._
+import com.radiantblue.piazza.JsonProtocol._
 
 import scala.collection.JavaConverters._
 
@@ -11,17 +12,18 @@ object InspectZippedShapefile {
 
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
       try {
+        val format = toJsonBytes[GeoMetadata]
         val upload = tuple.getValue(0).asInstanceOf[Upload]
         logger.info("Upload {}", upload)
-        val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.getLocator)
+        val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
         logger.info("path {}", path)
-        val result = InspectZippedShapefile.inspect(upload.getLocator, path.toFile)
+        val result = InspectZippedShapefile.inspect(upload.locator, path.toFile)
 
         result match {
           case Left(ex) => 
             logger.error("Failed to handle shapefile", ex)
           case Right(metadata) =>
-            _collector.emit(tuple, java.util.Arrays.asList[AnyRef](metadata.toByteArray))
+            _collector.emit(tuple, java.util.Arrays.asList[AnyRef](format(metadata)))
             logger.info("emitted")
         }
 
@@ -55,22 +57,20 @@ object InspectZippedShapefile {
       CRS.transform(tx, envelope)
     }
 
-    (GeoMetadata.newBuilder
-      .setLocator(locator)
-      .setCrsCode(srid)
-      .setNativeBoundingBox(toBoundingBox(envelope))
-      .setLatitudeLongitudeBoundingBox(toBoundingBox(latLonEnvelope))
-      .setNativeFormat("zipped-shapefile")
-      .build())
+    GeoMetadata(
+      locator=locator,
+      crsCode=srid,
+      nativeBoundingBox=toBoundingBox(envelope),
+      latitudeLongitudeBoundingBox=toBoundingBox(latLonEnvelope),
+      nativeFormat="zipped-shapefile")
   }
 
-  private def toBoundingBox(e: org.opengis.geometry.Envelope): GeoMetadata.BoundingBox = 
-    (GeoMetadata.BoundingBox.newBuilder
-      .setMinX(e.getMinimum(0))
-      .setMaxX(e.getMaximum(0))
-      .setMinY(e.getMinimum(1))
-      .setMaxY(e.getMaximum(1))
-      .build())
+  private def toBoundingBox(e: org.opengis.geometry.Envelope): Bounds =
+    Bounds(
+      minX=e.getMinimum(0),
+      maxX=e.getMaximum(0),
+      minY=e.getMinimum(1),
+      maxY=e.getMaximum(1))
 
   def inspect(locator: String, file: java.io.File): Either[Throwable, GeoMetadata] = {
     try {

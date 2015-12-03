@@ -26,7 +26,6 @@ import spray.httpx.marshalling.Marshaller
 
 import com.radiantblue.piazza._
 import com.radiantblue.piazza.postgres._
-import com.radiantblue.piazza.Messages._
 
 trait MetadataStore {
   def lookup(locator: String): (Metadata, GeoMetadata)
@@ -101,7 +100,7 @@ sealed class GeoServerPublish
   )
 
   def resolvePublisher(md: Metadata, geo: GeoMetadata, resource: java.nio.file.Path, server: Server): Publish[java.nio.file.Path, Server] =
-    geo.getNativeFormat match {
+    geo.nativeFormat match {
       case "geotiff" => Raster
       case "zipped-shapefile" => Feature
     }
@@ -142,50 +141,50 @@ sealed class GeoServerPublish
         "--perms",
         "--chmod=u+rw,g+rw,o+r",
         resource.toAbsolutePath.toString,
-        s"$sshUser@${server.getHost}:${server.getLocalPath}")
+        s"$sshUser@${server.host}:${server.localPath}")
       require(command.! == 0)
     }
 
     private def deleteFile(resource: java.nio.file.Path, server: Server): Future[Unit] = Future {
       import scala.sys.process._
       val key = sshKey.toAbsolutePath.toString
-      val path = java.nio.file.Paths.get(server.getLocalPath).resolve(resource.getFileName)
+      val path = java.nio.file.Paths.get(server.localPath).resolve(resource.getFileName)
       val command = Vector(
         "ssh",
         "-oStrictHostKeyChecking=no",
         "-q",
         s"-i$key",
-        s"${sshUser}@${server.getHost}",
+        s"${sshUser}@${server.host}",
         "rm",
         path.toAbsolutePath.toFile.toString)
       require(command.! == 0, s"Command $command failed")
     }
 
     def configure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
-      val id = md.getLocator
-      val serverUri: Uri = s"http://${server.getHost}:${server.getPort}/geoserver/rest/"
+      val id = md.locator
+      val serverUri: Uri = s"http://${server.host}:${server.port}/geoserver/rest/"
       val deleteUri = (s"workspaces/piazza/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
       val storeUri = ("workspaces/piazza/coveragestores": Uri) resolvedAgainst serverUri
       val layerUri = (s"workspaces/piazza/coveragestores/${id}/coverages": Uri) resolvedAgainst serverUri
       for {
         deleteR <- pipeline(Delete(deleteUri))
         storeR <- pipeline(Post(storeUri,
-          storeConfig(md.getLocator, md.getName, md.getLocator)))
+          storeConfig(md.locator, md.name, md.locator)))
         _ <- Future { require(storeR.status.isSuccess, "Store creation failed") }
         layerR <- pipeline(Post(layerUri,
           layerConfig(
-            md.getName,
-            md.getLocator,
-            geo.getNativeBoundingBox,
-            geo.getLatitudeLongitudeBoundingBox,
-            geo.getCrsCode)))
+            md.name,
+            md.locator,
+            geo.nativeBoundingBox,
+            geo.latitudeLongitudeBoundingBox,
+            geo.crsCode)))
         _ <- Future { require(layerR.status.isSuccess, "Layer creation failed") }
       } yield ()
     }
 
     def unconfigure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
-      val id = md.getLocator
-      val serverUri: Uri = s"http://${server.getHost}:${server.getPort}/geoserver/rest/"
+      val id = md.locator
+      val serverUri: Uri = s"http://${server.host}:${server.port}/geoserver/rest/"
       val deleteUri = (s"workspaces/piazza/coveragestores/${id}?recurse=true": Uri) resolvedAgainst serverUri
       for {
         deleteR <- pipeline(Delete(deleteUri))
@@ -208,7 +207,7 @@ sealed class GeoServerPublish
         <url>file:data/{file}</url>
       </coverageStore>
 
-    def layerConfig(name: String, nativeName: String, nativeBbox: GeoMetadata.BoundingBox, latlonBbox: GeoMetadata.BoundingBox, srid: String): scala.xml.NodeSeq =
+    def layerConfig(name: String, nativeName: String, nativeBbox: Bounds, latlonBbox: Bounds, srid: String): scala.xml.NodeSeq =
       <coverage>
         <name>{nativeName}</name>
         <nativeName>{nativeName}</nativeName>
@@ -224,16 +223,16 @@ sealed class GeoServerPublish
         </keywords>
         <srs>{srid}</srs>
         <nativeBoundingBox>
-          <minx>{nativeBbox.getMinX}</minx>
-          <maxx>{nativeBbox.getMaxX}</maxx>
-          <miny>{nativeBbox.getMinY}</miny>
-          <maxy>{nativeBbox.getMaxY}</maxy>
+          <minx>{nativeBbox.minX}</minx>
+          <maxx>{nativeBbox.maxX}</maxx>
+          <miny>{nativeBbox.minY}</miny>
+          <maxy>{nativeBbox.maxY}</maxy>
         </nativeBoundingBox>
         <latLonBoundingBox>
-          <minx>{latlonBbox.getMinX}</minx>
-          <maxx>{latlonBbox.getMaxX}</maxx>
-          <miny>{latlonBbox.getMinY}</miny>
-          <maxy>{latlonBbox.getMaxY}</maxy>
+          <minx>{latlonBbox.minX}</minx>
+          <maxx>{latlonBbox.maxX}</maxx>
+          <miny>{latlonBbox.minY}</miny>
+          <maxy>{latlonBbox.maxY}</maxy>
         </latLonBoundingBox>
         <projectionPolicy>REPROJECT_TO_DECLARED</projectionPolicy>
         <enabled>true</enabled>
@@ -290,7 +289,7 @@ sealed class GeoServerPublish
         "ogr2ogr",
         "-f", "PostgreSQL",
         "-overwrite",
-        "-nln", md.getLocator,
+        "-nln", md.locator,
         "-nlt", "PROMOTE_TO_MULTI",
         s"PG:dbname='${database}' user='${user}' host='${host}' port='${port}' password='${password}'",
         shpPath.toFile.getAbsolutePath)
@@ -301,8 +300,8 @@ sealed class GeoServerPublish
       val conn = postgres.connect()
       try {
         val query = conn.createStatement()
-        query.execute(s"""DROP TABLE IF EXISTS "${md.getLocator}" CASCADE""");
-        println("Dropped table " + md.getLocator)
+        query.execute(s"""DROP TABLE IF EXISTS "${md.locator}" CASCADE""");
+        println("Dropped table " + md.locator)
       } catch {
         case scala.util.control.NonFatal(ex) =>
           ex.printStackTrace()
@@ -313,8 +312,8 @@ sealed class GeoServerPublish
     }
 
     def configure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
-      val id = md.getLocator
-      val serverUri: Uri = s"http://${server.getHost}:${server.getPort}/geoserver/rest/"
+      val id = md.locator
+      val serverUri: Uri = s"http://${server.host}:${server.port}/geoserver/rest/"
       val deleteUri = (s"workspaces/piazza/datastores/postgis/featuretypes/${id}?recurse=true": Uri) resolvedAgainst serverUri
       val layerUri = (s"workspaces/piazza/datastores/postgis/featuretypes": Uri) resolvedAgainst serverUri
       for {
@@ -328,8 +327,8 @@ sealed class GeoServerPublish
     }
 
     def unconfigure(md: Metadata, geo: GeoMetadata, server: Server): Future[Unit] = {
-      val id = md.getLocator
-      val serverUri: Uri = s"http://${server.getHost}:${server.getPort}/geoserver/rest/"
+      val id = md.locator
+      val serverUri: Uri = s"http://${server.host}:${server.port}/geoserver/rest/"
       val deleteUri = (s"workspaces/piazza/datastores/postgis/featuretypes/${id}?recurse=true": Uri) resolvedAgainst serverUri
       for {
         deleteR <- pipeline(Delete(deleteUri))
@@ -343,26 +342,26 @@ sealed class GeoServerPublish
 
     def layerConfig(md: Metadata, geo: GeoMetadata): scala.xml.NodeSeq =
       <featureType>
-        <name>{md.getLocator}</name>
-        <nativeName>{md.getLocator}</nativeName>
-        <title>{md.getName}</title>
+        <name>{md.locator}</name>
+        <nativeName>{md.locator}</nativeName>
+        <title>{md.name}</title>
         <keywords>
           <string>features</string>
-          <string>{md.getName}</string>
+          <string>{md.name}</string>
         </keywords>
-        <nativeCRS>{ geo.getCrsCode }</nativeCRS>
-        <srs>{ geo.getCrsCode }</srs>
+        <nativeCRS>{ geo.crsCode }</nativeCRS>
+        <srs>{ geo.crsCode }</srs>
         <nativeBoundingBox>
-          <minx>{ geo.getNativeBoundingBox.getMinX }</minx>
-          <maxx>{ geo.getNativeBoundingBox.getMaxX }</maxx>
-          <miny>{ geo.getNativeBoundingBox.getMinY }</miny>
-          <maxy>{ geo.getNativeBoundingBox.getMaxX }</maxy>
+          <minx>{ geo.nativeBoundingBox.minX }</minx>
+          <maxx>{ geo.nativeBoundingBox.maxX }</maxx>
+          <miny>{ geo.nativeBoundingBox.minY }</miny>
+          <maxy>{ geo.nativeBoundingBox.maxX }</maxy>
         </nativeBoundingBox>
         <latLonBoundingBox>
-          <minx>{ geo.getLatitudeLongitudeBoundingBox.getMinX }</minx>
-          <maxx>{ geo.getLatitudeLongitudeBoundingBox.getMaxX }</maxx>
-          <miny>{ geo.getLatitudeLongitudeBoundingBox.getMinY }</miny>
-          <maxy>{ geo.getLatitudeLongitudeBoundingBox.getMaxX }</maxy>
+          <minx>{ geo.latitudeLongitudeBoundingBox.minX }</minx>
+          <maxx>{ geo.latitudeLongitudeBoundingBox.maxX }</maxx>
+          <miny>{ geo.latitudeLongitudeBoundingBox.minY }</miny>
+          <maxy>{ geo.latitudeLongitudeBoundingBox.maxX }</maxy>
         </latLonBoundingBox>
         <projectionPolicy>FORCE_DECLARED</projectionPolicy>
         <enabled>true</enabled>
@@ -444,9 +443,9 @@ sealed class PostgresLeasing(conn: java.sql.Connection)(implicit ec: ExecutionCo
 sealed case class Deploy[D]
   (metadataStore: MetadataStore,
    dataStore: DatasetStorage[D],
-   publish: Publish[D, com.radiantblue.piazza.Messages.Server],
+   publish: Publish[D, com.radiantblue.piazza.Server],
    leasing: Leasing,
-   track: Track[com.radiantblue.piazza.Messages.Server, Long])
+   track: Track[com.radiantblue.piazza.Server, Long])
   (implicit ec: scala.concurrent.ExecutionContext)
 {
   def attemptDeploy(locator: String, tag: Array[Byte]): Future[(Lease, DeployStatus)] = {
@@ -536,7 +535,7 @@ object Deployer {
       for (result <- deployer(postgresConnection).attemptDeploy(locator, tag)) yield {
         result._2 match {
           case Starting(_) => println("Deployment in progress")
-          case Live(_, server) => println(s"Deployed to server ${server.getHost}:${server.getPort}")
+          case Live(_, server) => println(s"Deployed to server ${server.host}:${server.port}")
           case Dead | Killing => println(s"Cannot deploy dataset with locator '$locator'")
         }
       }

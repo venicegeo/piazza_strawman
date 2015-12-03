@@ -2,7 +2,7 @@ package com.radiantblue.normalizer
 
 import com.radiantblue.deployer.Deployer
 import com.radiantblue.piazza._
-import com.radiantblue.piazza.Messages._
+import com.radiantblue.piazza.JsonProtocol._
 import com.radiantblue.piazza.postgres._
 
 object Deploy {
@@ -11,6 +11,7 @@ object Deploy {
     var _collector: backtype.storm.task.OutputCollector = _
 
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
+      val format = toJsonBytes[LeaseGranted]
       val postgres = Postgres("piazza.metadata.postgres").connect()
       implicit val system = akka.actor.ActorSystem("leasing")
       import system.dispatcher
@@ -20,20 +21,19 @@ object Deploy {
         val deployer = Deployer.deployer(postgres)
         val request = tuple.getValue(0).asInstanceOf[RequestDeploy]
         logger.info("Deploy request: {}", request)
-        val (metadata, geometadata) = deployer.metadataStore.lookup(request.getLocator)
-        val resource = deployer.dataStore.lookup(request.getLocator)
-        deployer.publish.publish(metadata, geometadata, resource, request.getServer)
-        deployer.track.deploymentSucceeded(request.getId)
-        val deployments = postgres.getLeasesByDeployment(request.getId)
+        val (metadata, geometadata) = deployer.metadataStore.lookup(request.locator)
+        val resource = deployer.dataStore.lookup(request.locator)
+        deployer.publish.publish(metadata, geometadata, resource, request.server)
+        deployer.track.deploymentSucceeded(request.deployId)
+        val deployments = postgres.getLeasesByDeployment(request.deployId)
         logger.info("Reporting success for deployments: {}", deployments)
         for (lease <- deployments) {
-          val message = LeaseGranted.newBuilder()
-            .setLocator(request.getLocator)
-            .setTimeout(0)
-            .setTag(com.google.protobuf.ByteString.copyFrom(lease.tag))
-            .build()
+          val message = LeaseGranted(
+            locator=request.locator,
+            timeout=0,
+            tag=lease.tag.to[Vector])
           logger.info("After successful deploy {}", message)
-          _collector.emit(tuple, java.util.Arrays.asList[AnyRef](message.toByteArray))
+          _collector.emit(tuple, java.util.Arrays.asList[AnyRef](format(message)))
         }
         _collector.ack(tuple)
       } catch {

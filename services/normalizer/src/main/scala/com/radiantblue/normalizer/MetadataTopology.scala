@@ -2,12 +2,15 @@ package com.radiantblue.normalizer
 
 import mapper._
 
+import com.radiantblue.piazza._
+import com.radiantblue.piazza.JsonProtocol._
+
 object MetadataTopology {
-  def main(args: Array[String]): Unit = {
-    val uploads = Kafka.spoutForTopic("uploads", UploadScheme)
-    val lease = Kafka.spoutForTopic("lease-requests", LeaseScheme)
-    val simplifyRequests = Kafka.spoutForTopic("simplify-requests", SimplifyScheme)
-    val leaseGrants = Kafka.spoutForTopic("lease-grants", LeaseGrantScheme)
+  def topology(): backtype.storm.generated.StormTopology = {
+    val uploads = Kafka.spoutForTopic("uploads", JsonScheme.Uploads)
+    val lease = Kafka.spoutForTopic("lease-requests", JsonScheme.RequestLeases)
+    val simplifyRequests = Kafka.spoutForTopic("simplify-requests", JsonScheme.RequestSimplifies)
+    val leaseGrants = Kafka.spoutForTopic("lease-grants", JsonScheme.LeaseGranteds)
     val metadataSink = Kafka.boltForTopic("metadata", DirectTupleMapper)
     val leaseSink = Kafka.boltForTopic("lease-grants", DirectTupleMapper)
 
@@ -35,7 +38,13 @@ object MetadataTopology {
     builder.setSpout("lease-grants", leaseGrants)
     builder.setBolt("simplification-processing", FeatureSimplifier.simplifyBolt).shuffleGrouping("lease-grants")
 
+    builder.createTopology()
+  }
+
+  def main(args: Array[String]): Unit = {
+    val topo = topology()
     val conf = Kafka.topologyConfig
-    backtype.storm.StormSubmitter.submitTopology("Metadata", conf, builder.createTopology)
+    backtype.storm.StormSubmitter.submitTopology("Metadata", conf, topo)
   }
 }
+

@@ -1,6 +1,7 @@
 package com.radiantblue.normalizer
 
-import com.radiantblue.piazza.Messages._
+import com.radiantblue.piazza._
+import com.radiantblue.piazza.JsonProtocol._
 
 object Inspect {
   val bolt: backtype.storm.topology.IRichBolt  = new backtype.storm.topology.base.BaseRichBolt {
@@ -8,9 +9,10 @@ object Inspect {
     var _collector: backtype.storm.task.OutputCollector = _
 
     def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
+      val format = toJsonBytes[Metadata]
       val upload = tuple.getValue(0).asInstanceOf[Upload]
       logger.info("Upload {}", upload)
-      val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.getLocator)
+      val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
       logger.info("path {}", path)
       val size = java.nio.file.Files.getAttribute(path, "size").asInstanceOf[java.lang.Long]
       logger.info("size {}", size)
@@ -33,13 +35,12 @@ object Inspect {
       }
       logger.info("checksum {}", checksum.map(b => f"$b%02X").mkString)
 
-      val message = Metadata.newBuilder
-        .setName(upload.getName)
-        .setLocator(upload.getLocator)
-        .setChecksum(com.google.protobuf.ByteString.copyFrom(checksum))
-        .setSize(size)
-        .build
-      _collector.emit(tuple, java.util.Arrays.asList[AnyRef](message.toByteArray))
+      val message = Metadata(
+        name=upload.name,
+        locator=upload.locator,
+        checksum=checksum.to[Vector],
+        size=size)
+      _collector.emit(tuple, java.util.Arrays.asList[AnyRef](format(message)))
       logger.info("emitted")
       _collector.ack(tuple)
     }

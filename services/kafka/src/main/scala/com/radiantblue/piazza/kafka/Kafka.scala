@@ -5,7 +5,7 @@ import scala.collection.JavaConverters._
 object Kafka {
   lazy val config = com.typesafe.config.ConfigFactory.load()
 
-  def zookeepers: Vector[String] = 
+  def zookeepers: Vector[String] =
     config.getStringList("piazza.kafka.zookeepers").asScala.to[Vector]
 
   def brokers: Vector[String] =
