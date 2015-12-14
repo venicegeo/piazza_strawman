@@ -32,6 +32,7 @@ object GeoIntMessaging extends Build {
     .dependsOn(core, deployer, kafka, postgres)
   lazy val normalizer = project
     .settings(commonSettings: _*)
+    .enablePlugins(JavaAppPackaging)
     .dependsOn(core, deployer, kafka)
   lazy val ogcproxy = project
     .enablePlugins(JavaAppPackaging)
