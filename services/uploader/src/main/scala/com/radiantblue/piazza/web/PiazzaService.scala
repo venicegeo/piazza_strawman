@@ -58,7 +58,6 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
 
   def kafkaProducer: kafka.producer.Producer[String, Array[Byte]]
   def jdbcConnection: java.sql.Connection
-  def deployer = com.radiantblue.deployer.Deployer.deployer(jdbcConnection)
 
   private val frontendRoute =
     path("") {
@@ -83,9 +82,11 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     post {
       formFields("data".as[BodyPart]) { data =>
         detach() {
-          val locator = (new com.radiantblue.deployer.FileSystemDatasetStorage()).store(data)
-          fireUploadEvent(data.filename.getOrElse(""), locator)
-          redirect("/", StatusCodes.Found)
+          Deployer.withDeployer { dep =>
+            val locator = dep.dataStore.store(data)
+            fireUploadEvent(data.filename.getOrElse(""), locator)
+            redirect("/", StatusCodes.Found)
+          }
         }
       }
     }
@@ -102,7 +103,6 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
               complete(
                   xml.wfs_1_0_0(jdbcConnection.deploymentWithMetadata(dataset)))
             case _ =>
-              implicitly[spray.json.RootJsonFormat[com.radiantblue.piazza.Server]]
               complete(
                   Map("servers" -> jdbcConnection.deployedServers(dataset)))
           }
@@ -165,7 +165,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     pathPrefix("datasets") { datasetsApi } ~
     pathPrefix("deployments") { deploymentsApi }
 
-    
+
   def fireUploadEvent(filename: String, storageKey: String): Unit = {
     val format = toJsonBytes[Upload]
     val upload = Upload(

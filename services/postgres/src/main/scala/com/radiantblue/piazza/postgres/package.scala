@@ -336,7 +336,6 @@ package object postgres {
                 port=rs.getInt(4),
                 localPath=rs.getString(5))
               Live(id, server)
-            case "killing" => Killing
             case "dead" => Dead
           }
         }).headOption.getOrElse(Dead)
@@ -466,7 +465,6 @@ package object postgres {
                 port=rs.getInt(4),
                 localPath=rs.getString(5))
               Live(id, server)
-            case "killing" => Killing
             case "dead" => Dead
           }
         }).head

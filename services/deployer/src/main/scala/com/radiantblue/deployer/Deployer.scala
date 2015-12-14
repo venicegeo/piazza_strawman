@@ -1,16 +1,4 @@
-package com.radiantblue {
-  package object deployer {
-    import scala.concurrent.{ ExecutionContext, Future }
-
-    implicit class NoisyFuture[T](val f: Future[T]) extends AnyVal {
-      def noisy(implicit ec: ExecutionContext): Future[T] = {
-        f.map { t => println(t); t }
-      }
-    }
-  }
-}
-
-package com.radiantblue.deployer {
+package com.radiantblue.deployer
 
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
@@ -27,10 +15,16 @@ import spray.httpx.marshalling.Marshaller
 import com.radiantblue.piazza._
 import com.radiantblue.piazza.postgres._
 
+/**
+ * A MetadataStore is able to retrieve recorded metadata and geospatial metadata by locator string.
+ */
 trait MetadataStore {
   def lookup(locator: String): (Metadata, GeoMetadata)
 }
 
+/**
+ * MetadataStore for Postgres databases
+ */
 class PostgresMetadataStore(conn: java.sql.Connection)(implicit ec: ExecutionContext)
   extends MetadataStore
 {
@@ -47,6 +41,9 @@ trait DatasetStorage[R] {
   def store(body: BodyPart): String
 }
 
+/**
+ * DatasetStorage for the local filesystem
+ */
 sealed class FileSystemDatasetStorage(prefix: String = "file:///tmp/") extends DatasetStorage[java.nio.file.Path] {
   import java.nio.file.{ Files, Path, Paths }
   private val prefixPath = Paths.get(new java.net.URI(prefix))
@@ -78,11 +75,13 @@ trait Publish[R,S] {
   def unpublish(metadata: Metadata, geo: GeoMetadata, resource: R, server: S): Unit
 }
 
+/**
+ * Publish for GeoServer instances
+ */
 sealed class GeoServerPublish
   (sshUser: String, sshKey: java.nio.file.Path,
    geoserverUser: String, geoserverPassword: String,
    postgres: Postgres)
-   // pgUser: String, pgPassword: String, pgHost: String, pgPort: Int, pgDatabase: String)
   (implicit system: ActorSystem, ec: ExecutionContext)
   extends Publish[java.nio.file.Path, Server]
 {
@@ -448,13 +447,20 @@ sealed case class Deploy[D]
    track: Track[com.radiantblue.piazza.Server, Long])
   (implicit ec: scala.concurrent.ExecutionContext)
 {
+  /**
+   * Request a deployment of the dataset with the given locator
+   * If a live or pending deployment already exists it will be associated with
+   * the lease instead of starting a new deployment.
+   * 
+   * @return a Future with the new Lease and the DeployStatus at the time the Lease is created
+   */
   def attemptDeploy(locator: String, tag: Array[Byte]): Future[(Lease, DeployStatus)] = {
     Future(track.deploymentStatus(locator)).flatMap {
       case status @ Starting(token) =>
         for (lease <- Future(leasing.createLease(locator, token, tag))) yield (lease, status)
       case status @ Live(token, _) =>
         for (lease <- Future(leasing.attachLease(locator, token, tag))) yield (lease, status)
-      case Killing | Dead =>
+      case Dead =>
         for {
           token <- beginDeployment(locator)._1
           lease <- Future(leasing.attachLease(locator, token, tag))
@@ -462,6 +468,13 @@ sealed case class Deploy[D]
     }
   }
 
+  /**
+   * Request a new deployment of the dataset with the given locator
+   *
+   * @return a Future of the deployment id that completes as soon as the id is
+   * assigned, and a Future of the server details that completes once the
+   * deployment finishes
+   */
   def beginDeployment(locator: String): (Future[Long], Future[Server]) = {
     val deploymentInfo = Future(track.deploymentStarted(locator))
     val deployment =
@@ -475,9 +488,17 @@ sealed case class Deploy[D]
     (deploymentInfo.map(_._2), deployment)
   }
 
+  /**
+   * Get the status of the deployment associated with a lease
+   */
   def checkDeploy(leaseId: Long): Future[DeployStatus] =
     Future { leasing.checkDeploy(leaseId) }
 
+  /**
+   * Find and destroy all deployments with no unexpired leases.
+   *
+   * @return a Future that completes when all undeployments are done
+   */
   def cull(): Future[Unit] =
     Future(track.timedOutDeployments).flatMap { deployments =>
       Future.sequence {
@@ -494,7 +515,26 @@ sealed case class Deploy[D]
 }
 
 object Deployer {
-  def deployer(postgresConnection: java.sql.Connection)(implicit system: ActorSystem, context: ExecutionContext) = {
+
+  /**
+   * Use the [[http://stackoverflow.com/questions/20762240/loan-pattern-in-scala Loan pattern]] to create, use, and destroy a Deploy instance. 
+   * Note that the Deploy instance is destroyed automatically after the passed
+   * in function returns or throws, so returning any object that closes over
+   * the Deploy will cause failures.
+   */
+  def withDeployer[T](f: Deploy[java.nio.file.Path] => T): T = {
+    implicit val system: ActorSystem = ActorSystem("spray-client")
+    import system.dispatcher
+
+    try {
+      val postgresConnection = Postgres("piazza.metadata.postgres").connect()
+      try {
+        f(deployer(postgresConnection))
+      } finally postgresConnection.close()
+    } finally system.shutdown()
+  }
+
+  private def deployer(postgresConnection: java.sql.Connection)(implicit system: ActorSystem, context: ExecutionContext) = {
     val config = com.typesafe.config.ConfigFactory.load()
 
     val publisher = {
@@ -536,7 +576,7 @@ object Deployer {
         result._2 match {
           case Starting(_) => println("Deployment in progress")
           case Live(_, server) => println(s"Deployed to server ${server.host}:${server.port}")
-          case Dead | Killing => println(s"Cannot deploy dataset with locator '$locator'")
+          case Dead => println(s"Cannot deploy dataset with locator '$locator'")
         }
       }
 
@@ -550,6 +590,11 @@ object Deployer {
   }
 }
 
+/**
+ * Executable object to cull the database.
+ *
+ * @see [[Deploy#cull]]
+ */
 object Cull {
   def main(args: Array[String]): Unit = {
     implicit val system: ActorSystem = ActorSystem("spray-client")
@@ -558,14 +603,14 @@ object Cull {
     val postgresConnection = Postgres("piazza.metadata.postgres").connect()
     val config = com.typesafe.config.ConfigFactory.load()
 
-    val dep = Deployer.deployer(postgresConnection)
-    dep.cull().onComplete { _ =>
-      println("Done")
-      try
-        postgresConnection.close()
-      finally
-        system.shutdown()
+    Deployer.withDeployer { dep =>
+      dep.cull().onComplete { _ =>
+        println("Done")
+        try
+          postgresConnection.close()
+        finally
+          system.shutdown()
+      }
     }
   }
-}
 }

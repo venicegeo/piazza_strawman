@@ -58,7 +58,8 @@ object Boot {
     implicit val system = ActorSystem("on-spray-can")
     implicit val timeout = Timeout(5.seconds)
 
+    val port = Option(System.getenv("PORT")).map(_.toInt).getOrElse(8080)
     val service = system.actorOf(Props[PiazzaServiceActor], "piazza-service")
-    IO(Http) ? Http.Bind(service, interface = "0.0.0.0", port = 8080)
+    IO(Http) ? Http.Bind(service, interface = "0.0.0.0", port = port)
   }
 }

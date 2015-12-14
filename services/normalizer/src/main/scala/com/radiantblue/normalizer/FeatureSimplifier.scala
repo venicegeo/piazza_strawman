@@ -126,7 +126,7 @@ object FeatureSimplifier {
     producer.send(keyedMessage)
   }
 
-  def walk(f: java.io.File): Iterator[java.io.File] = 
+  def walk(f: java.io.File): Iterator[java.io.File] =
     Iterator(f) ++ Option(f.listFiles: Seq[java.io.File]).getOrElse(Nil).flatMap(walk)
 
   private def zipCompress(file: java.io.File): java.io.File = {

@@ -17,32 +17,32 @@ object Lease {
       import scala.concurrent.Await, scala.concurrent.duration.Duration
 
       try {
-        val deployer = Deployer.deployer(postgres)
-        val request = tuple.getValue(0).asInstanceOf[RequestLease]
-        logger.info("Lease request: {}", request)
-        val status = deployer.track.deploymentStatus(request.locator)
-        status match {
-          case Starting(id) =>
-            deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
-            // no message sent at this point, grant will be sent on completion
-          case Live(id, server) =>
-            val format = toJsonBytes[LeaseGranted]
-            deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
-            // send message to lease-grants that lease is granted
-            val message = LeaseGranted(
-              locator=request.locator,
-              timeout=request.timeout,
-              tag=request.tag)
-            _collector.emit("lease-grants", tuple, java.util.Arrays.asList[AnyRef](format(message)))
-          case Killing | Dead =>
-            val (server, id) = deployer.track.deploymentStarted(request.locator)
-            deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
-            val message = RequestDeploy(
-              locator=request.locator,
-              server=server,
-              deployId=id,
-              tag=request.tag)
-            _collector.emit("deploy-requests", tuple, java.util.Arrays.asList[AnyRef](message))
+        Deployer.withDeployer { deployer =>
+          val request = tuple.getValue(0).asInstanceOf[RequestLease]
+          logger.info("Lease request: {}", request)
+          val status = deployer.track.deploymentStatus(request.locator)
+          status match {
+            case Starting(id) =>
+              deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
+              // no message sent at this point, grant will be sent on completion
+            case Live(id, server) =>
+              val format = toJsonBytes[LeaseGranted]
+              deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
+              // send message to lease-grants that lease is granted
+              val message = LeaseGranted(
+                locator=request.locator,
+                timeout=request.timeout,
+                tag=request.tag)
+              _collector.emit("lease-grants", tuple, java.util.Arrays.asList[AnyRef](format(message)))
+            case Dead =>
+              val (server, id) = deployer.track.deploymentStarted(request.locator)
+              deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
+              val message = RequestDeploy(
+                locator=request.locator,
+                server=server,
+                deployId=id)
+              _collector.emit("deploy-requests", tuple, java.util.Arrays.asList[AnyRef](message))
+          }
         }
         _collector.ack(tuple)
       } catch {

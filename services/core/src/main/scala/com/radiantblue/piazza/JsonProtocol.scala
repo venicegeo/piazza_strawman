@@ -2,6 +2,9 @@ package com.radiantblue.piazza
 
 import spray.json._
 
+/**
+ * Json codecs for "core" message types in Piazza
+ */
 object JsonProtocol extends DefaultJsonProtocol {
   def toJsonBytes[T : JsonFormat]: T => Array[Byte] = t =>
     t.toJson.compactPrint.getBytes("utf-8")
@@ -25,7 +28,7 @@ object JsonProtocol extends DefaultJsonProtocol {
   implicit val serverFormat: RootJsonFormat[Server] = jsonFormat3(Server)
   implicit val requestLeaseFormat: RootJsonFormat[RequestLease] = jsonFormat3(RequestLease)
   implicit val leaseGrantedFormat: RootJsonFormat[LeaseGranted] = jsonFormat3(LeaseGranted)
-  implicit val requestDeployFormat: RootJsonFormat[RequestDeploy] = jsonFormat4(RequestDeploy)
+  implicit val requestDeployFormat: RootJsonFormat[RequestDeploy] = jsonFormat3(RequestDeploy)
   implicit val requestSimplifyFormat: RootJsonFormat[RequestSimplify] = jsonFormat2(RequestSimplify)
 
   implicit val deployStatusFormat: RootJsonFormat[DeployStatus] = {
@@ -37,7 +40,6 @@ object JsonProtocol extends DefaultJsonProtocol {
         json.asJsObject.fields("status").convertTo[String] match {
           case "starting" => json.convertTo[Starting]
           case "live" => json.convertTo[Live]
-          case "killing" => Killing
           case "dead" => Dead
         }
 
@@ -45,7 +47,6 @@ object JsonProtocol extends DefaultJsonProtocol {
         val (tag, json) = status match {
           case s: Starting => ("starting", s.toJson)
           case l: Live => ("live", l.toJson)
-          case Killing => ("killing", JsObject())
           case Dead => ("dead", JsObject())
         }
         JsObject(json.asJsObject.fields + ("status" -> tag.toJson))
