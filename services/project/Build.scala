@@ -33,6 +33,7 @@ object GeoIntMessaging extends Build {
   lazy val normalizer = project
     .settings(commonSettings: _*)
     .enablePlugins(JavaAppPackaging)
+    .disablePlugins(AssemblyPlugin)
     .dependsOn(core, deployer, kafka)
   lazy val ogcproxy = project
     .enablePlugins(JavaAppPackaging)

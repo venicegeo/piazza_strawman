@@ -7,13 +7,11 @@
   sudo: yes
   roles:
       - kafka
-      - storm
       - uploader
       - normalizer
       - deployer
   tasks:
       - script: deploy_kafka_queues.sh creates=/opt/kafka/deployed_piazza_queues
-      - script: deploy_storm_topologies.sh creates=/opt/storm/deployed_piazza_topologies
 - hosts: geoserver
   sudo: yes
   roles:

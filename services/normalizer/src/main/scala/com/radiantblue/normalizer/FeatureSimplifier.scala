@@ -1,5 +1,6 @@
 package com.radiantblue.normalizer
 
+import kafka.consumer.Whitelist
 import scala.collection.JavaConverters._
 import com.vividsolutions.jts.simplify.DouglasPeuckerSimplifier.simplify
 import com.radiantblue.piazza.{ kafka => _, _}
@@ -7,44 +8,49 @@ import spray.json._
 import JsonProtocol._
 
 object FeatureSimplifier {
-  val leaseBolt: backtype.storm.topology.IRichBolt = new backtype.storm.topology.base.BaseRichBolt {
-    val logger = org.slf4j.LoggerFactory.getLogger(FeatureSimplifier.getClass)
-    var _collector: backtype.storm.task.OutputCollector = _
+  val logger = org.slf4j.LoggerFactory.getLogger(FeatureSimplifier.getClass)
 
-    def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
-      val simplify = tuple.getValue(0).asInstanceOf[RequestSimplify]
-      receiveJob(simplify.locator, simplify.tolerance)
-      logger.info("Simplify {}", simplify)
-      _collector.ack(tuple)
+  def thread(f: => Any): java.lang.Thread =
+    new java.lang.Thread {
+      override def run(): Unit = { f }
+      start()
     }
 
-    def prepare(conf: java.util.Map[_, _], context: backtype.storm.task.TopologyContext, collector: backtype.storm.task.OutputCollector): Unit = {
-      _collector = collector
-    }
+  val parseRequest = fromJsonBytes[RequestSimplify]
+  val parseGrant = fromJsonBytes[LeaseGranted]
 
-    def declareOutputFields(declarer: backtype.storm.topology.OutputFieldsDeclarer): Unit = {
-      declarer.declare(new backtype.storm.tuple.Fields("message"))
+  def main(args: Array[String]): Unit = {
+    val producer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
+    val consumer = com.radiantblue.piazza.kafka.Kafka.consumer("feature-simplifier")
+    val requestStreams = consumer.createMessageStreamsByFilter(Whitelist("simplify-requests"))
+    val requestThreads = requestStreams.map { stream =>
+      thread {
+        stream.foreach { message =>
+          try {
+            val simplify = parseRequest(message.message)
+            receiveJob(simplify.locator, simplify.tolerance, producer)
+            logger.debug("Simplify {}", simplify)
+          } catch {
+            case scala.util.control.NonFatal(ex) => logger.error("Failure in simplifier service", ex)
+          }
+        }
+      }
     }
-  }
-
-  val simplifyBolt: backtype.storm.topology.IRichBolt = new backtype.storm.topology.base.BaseRichBolt {
-    val logger = org.slf4j.LoggerFactory.getLogger(FeatureSimplifier.getClass)
-    var _collector: backtype.storm.task.OutputCollector = _
-
-    def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
-      val grant = tuple.getValue(0).asInstanceOf[LeaseGranted]
-      receiveLease(grant)
-      logger.info("Simplify {}", grant)
-      _collector.ack(tuple)
+    val simplifyStreams = consumer.createMessageStreamsByFilter(Whitelist("lease-grants"))
+    val simplifyThreads = simplifyStreams.map { stream =>
+      thread {
+        stream.foreach { message =>
+          try {
+            val grant = parseGrant(message.message)
+            receiveLease(grant, producer)
+            logger.info("Grant {}", grant)
+          } catch {
+            case scala.util.control.NonFatal(ex) => logger.error("Failure in simplifier executor", ex)
+          }
+        }
+      }
     }
-
-    def prepare(conf: java.util.Map[_, _], context: backtype.storm.task.TopologyContext, collector: backtype.storm.task.OutputCollector): Unit = {
-      _collector = collector
-    }
-
-    def declareOutputFields(declarer: backtype.storm.topology.OutputFieldsDeclarer): Unit = {
-      declarer.declare(new backtype.storm.tuple.Fields("message"))
-    }
+    requestThreads.foreach { _.join() }
   }
 
   def connect(args: (String, java.io.Serializable)*): org.geotools.data.DataStore = {
@@ -69,9 +75,9 @@ object FeatureSimplifier {
 
   def run(
     wfsCapabilitiesUrl: java.net.URL,
-    resultFile: java.io.File, 
+    resultFile: java.io.File,
     tolerance: Double)
-  : Unit 
+  : Unit
   = {
     val store = connect("WFSDataStoreFactory:GET_CAPABILITIES_URL" -> wfsCapabilitiesUrl)
     try {
@@ -94,18 +100,16 @@ object FeatureSimplifier {
     } finally store.dispose
   }
 
-  def main(args: Array[String]): Unit = {
-    val Array(source, tolerance) = args
-    val sink = java.nio.file.Files.createTempDirectory("feature-simplifier-work").toFile
-    run(new java.net.URL(source), sink, tolerance.toDouble)
-    println(zipCompress(sink))
-  }
-
-  val producer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
+  // def main(args: Array[String]): Unit = {
+  //   val Array(source, tolerance) = args
+  //   val sink = java.nio.file.Files.createTempDirectory("feature-simplifier-work").toFile
+  //   run(new java.net.URL(source), sink, tolerance.toDouble)
+  //   println(zipCompress(sink))
+  // }
 
   private def getResultFile: java.io.File =
     java.nio.file.Files.createTempDirectory("feature-simplifier-work").toFile
-  private def requestLease(locator: String, timeout: Long, tag: Array[Byte]): Unit = {
+  private def requestLease(locator: String, timeout: Long, tag: Array[Byte], producer: kafka.producer.Producer[String, Array[Byte]]): Unit = {
     val message = RequestLease(
       locator=locator,
       timeout=timeout,
@@ -114,11 +118,11 @@ object FeatureSimplifier {
     producer.send(keyedMessage)
   }
 
-  private def wfsUrl(g: LeaseGranted): java.net.URL = 
+  private def wfsUrl(g: LeaseGranted): java.net.URL =
     new java.net.URL(
       s"http://192.168.23.11:8080/api/deployments?dataset=${g.locator}&SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities")
 
-  private def publish(file: java.io.File): Unit = {
+  private def publish(file: java.io.File, producer: kafka.producer.Producer[String, Array[Byte]]): Unit = {
     val message = Upload(
       locator=file.getAbsolutePath,
       name="simplify-result")
@@ -153,19 +157,18 @@ object FeatureSimplifier {
     buff.array
   }
 
-  def receiveJob(locator: String, tolerance: Double): Unit = {
+  def receiveJob(locator: String, tolerance: Double, producer: kafka.producer.Producer[String, Array[Byte]]): Unit = {
     val tag = randomTag()
     synchronized {
       context += (tag.toSeq -> (locator, tolerance))
     }
-    requestLease(locator, 60 * 60 * 1000, tag)
+    requestLease(locator, 60 * 60 * 1000, tag, producer)
   }
 
-  def receiveLease(g: LeaseGranted): Unit = {
-    val key = g.tag.to[Array]
+  def receiveLease(g: LeaseGranted, producer: kafka.producer.Producer[String, Array[Byte]]): Unit = {
     val ctx = synchronized {
-      val result = context.get(key.toSeq)
-      context -= key.toSeq
+      val result = context.get(g.tag)
+      context -= g.tag
       result
     }
 
@@ -174,7 +177,7 @@ object FeatureSimplifier {
       val resultFile = getResultFile
       run(wfsCapabilitiesUrl, resultFile, tolerance)
       val archive = zipCompress(resultFile)
-      publish(archive)
+      publish(archive, producer)
     }
   }
 }

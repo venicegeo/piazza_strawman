@@ -1,0 +1,18 @@
+[Unit]
+Description=Piazza metadata persister service
+DefaultDependencies=no
+After=
+Conflicts=
+Before=
+Requires=
+
+[Service]
+ExecStart=/opt/normalizers/bin/normalizer -main com.radiantblue.normalizer.InspectGeoTiff
+## To not use augenrules, copy this file to /etc/systemd/system/auditd.service
+## and comment/delete the next line and uncomment the auditctl line.
+## NOTE: augenrules expect any rules to be added to /etc/audit/rules.d/
+# ExecStartPost=
+# ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multiuser.target

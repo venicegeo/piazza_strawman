@@ -2,7 +2,6 @@ package com.radiantblue.normalizer
 
 import scala.collection.JavaConverters._
 import kafka.consumer.Whitelist
-import com.radiantblue.normalizer.mapper._
 import com.radiantblue.piazza._
 import com.radiantblue.piazza.JsonProtocol._
 import com.radiantblue.piazza.postgres._

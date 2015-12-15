@@ -1,37 +1,49 @@
 package com.radiantblue.normalizer
 
+import kafka.consumer.Whitelist
+import kafka.producer.KeyedMessage
 import com.radiantblue.piazza._
 import com.radiantblue.piazza.JsonProtocol._
 import scala.collection.JavaConverters._
 
 object InspectGeoTiff {
-  val bolt: backtype.storm.topology.IRichBolt = new backtype.storm.topology.base.BaseRichBolt {
-    val logger = org.slf4j.LoggerFactory.getLogger(InspectGeoTiff.getClass)
-    var _collector: backtype.storm.task.OutputCollector = _
+  val logger = org.slf4j.LoggerFactory.getLogger(InspectGeoTiff.getClass)
 
-    def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
-      val format = toJsonBytes[GeoMetadata]
-      val upload = tuple.getValue(0).asInstanceOf[Upload]
-      logger.info("Upload {}", upload)
-      val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
-      logger.info("path {}", path)
-      val result = InspectGeoTiff.inspect(upload.locator, path.toFile)
+  def thread(f: => Any): java.lang.Thread =
+    new java.lang.Thread {
+      override def run(): Unit = { f }
+      start()
+    }
 
-      result.foreach { r =>
-        _collector.emit(tuple, java.util.Arrays.asList[AnyRef](format(r)))
-        logger.info("emitted")
+  val parseUpload = fromJsonBytes[Upload]
+  val formatMetadata = toJsonBytes[GeoMetadata]
+
+  def main(args: Array[String]): Unit = {
+    val producer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
+    val consumer = com.radiantblue.piazza.kafka.Kafka.consumer("inspect-geotiff")
+    val streams = consumer.createMessageStreamsByFilter(Whitelist("uploads"))
+    val threads = streams.map { stream =>
+      thread {
+        stream.foreach { message =>
+          try {
+            val upload = parseUpload(message.message)
+            logger.debug("Upload {}", upload)
+            val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
+            logger.debug("path {}", path)
+            val result = InspectGeoTiff.inspect(upload.locator, path.toFile)
+
+            result.foreach { r =>
+              producer.send(new KeyedMessage("metadata", formatMetadata(r)))
+              logger.debug("Emitted {}", r)
+            }
+          } catch {
+            case scala.util.control.NonFatal(ex) =>
+              logger.error("Failed to extract geotiff metadata", ex)
+          }
+        }
       }
-
-      _collector.ack(tuple)
     }
-
-    def prepare(conf: java.util.Map[_, _], context: backtype.storm.task.TopologyContext, collector: backtype.storm.task.OutputCollector): Unit = {
-      _collector = collector
-    }
-
-    def declareOutputFields(declarer: backtype.storm.topology.OutputFieldsDeclarer): Unit = {
-      declarer.declare(new backtype.storm.tuple.Fields("message"))
-    }
+    threads.foreach { _.join() }
   }
 
   private def geoMetadata(
@@ -85,14 +97,6 @@ object InspectGeoTiff {
       } finally {
         reader.dispose()
       }
-    }
-  }
-
-  def main(args: Array[String]): Unit = {
-    val file = new java.io.File(args.head)
-    inspect("here", file) match{
-      case Some(result) => println(result)
-      case None => println("Could not read file " + file)
     }
   }
 }

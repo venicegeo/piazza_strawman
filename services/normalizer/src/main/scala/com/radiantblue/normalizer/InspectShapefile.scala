@@ -1,47 +1,53 @@
 package com.radiantblue.normalizer
 
+import kafka.consumer.Whitelist
+import kafka.producer.KeyedMessage
 import com.radiantblue.piazza._
 import com.radiantblue.piazza.JsonProtocol._
 
 import scala.collection.JavaConverters._
 
 object InspectZippedShapefile {
-  val bolt: backtype.storm.topology.IRichBolt = new backtype.storm.topology.base.BaseRichBolt {
-    val logger = org.slf4j.LoggerFactory.getLogger(InspectZippedShapefile.getClass)
-    var _collector: backtype.storm.task.OutputCollector = _
+  val logger = org.slf4j.LoggerFactory.getLogger(InspectZippedShapefile.getClass)
 
-    def execute(tuple: backtype.storm.tuple.Tuple): Unit = {
-      try {
-        val format = toJsonBytes[GeoMetadata]
-        val upload = tuple.getValue(0).asInstanceOf[Upload]
-        logger.info("Upload {}", upload)
-        val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
-        logger.info("path {}", path)
-        val result = InspectZippedShapefile.inspect(upload.locator, path.toFile)
+  def thread(f: => Any): java.lang.Thread =
+    new java.lang.Thread {
+      override def run(): Unit = { f }
+      start()
+    }
 
-        result match {
-          case Left(ex) => 
-            logger.error("Failed to handle shapefile", ex)
-          case Right(metadata) =>
-            _collector.emit(tuple, java.util.Arrays.asList[AnyRef](format(metadata)))
-            logger.info("emitted")
+  val parseUpload = fromJsonBytes[Upload]
+  val formatMetadata = toJsonBytes[GeoMetadata]
+
+  def main(args: Array[String]): Unit = {
+    val producer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
+    val consumer = com.radiantblue.piazza.kafka.Kafka.consumer("inspect-zipped-shapefile")
+    val streams = consumer.createMessageStreamsByFilter(Whitelist("uploads"))
+    val threads = streams.map { stream =>
+      thread {
+        stream.foreach { message =>
+          try {
+            val upload = parseUpload(message.message)
+            logger.info("Upload {}", upload)
+            val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
+            logger.info("path {}", path)
+            val result = InspectZippedShapefile.inspect(upload.locator, path.toFile)
+
+            result match {
+              case Left(ex) =>
+                logger.error("Failed to handle shapefile", ex)
+              case Right(metadata) =>
+                producer.send(new KeyedMessage("metadata", formatMetadata(metadata)))
+                logger.info("Emitted {}", metadata)
+            }
+          } catch {
+            case scala.util.control.NonFatal(ex) =>
+              logger.error("Failed to extract shapefile metadata", ex)
+          }
         }
-
-        _collector.ack(tuple)
-      } catch {
-        case scala.util.control.NonFatal(ex) => 
-          logger.error("Failed to handle shapefile", ex)
-          _collector.fail(tuple)
       }
     }
-
-    def prepare(conf: java.util.Map[_, _], context: backtype.storm.task.TopologyContext, collector: backtype.storm.task.OutputCollector): Unit = {
-      _collector = collector
-    } 
-
-    def declareOutputFields(declarer: backtype.storm.topology.OutputFieldsDeclarer): Unit = {
-      declarer.declare(new backtype.storm.tuple.Fields("message"))
-    }
+    threads.foreach { _.join() }
   }
 
   private def geoMetadata(
@@ -101,12 +107,8 @@ object InspectZippedShapefile {
         Right(geoMetadata(locator, source.getSchema.getCoordinateReferenceSystem, source.getBounds))
       } finally store.dispose()
     } catch {
-      case scala.util.control.NonFatal(ex) => 
+      case scala.util.control.NonFatal(ex) =>
         Left(ex)
     }
-  }
-
-  def main(args: Array[String]) {
-    println(inspect(args(0), new java.io.File(args(0))))
   }
 }

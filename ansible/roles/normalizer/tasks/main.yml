@@ -1,11 +1,19 @@
-- file:
-    dest=/opt/normalizer/
-    state=directory
-- copy:
-    src=normalizer-assembly-0.1-SNAPSHOT.jar
-    dest=/opt/normalizer
-    owner=root
+# - file:
+#     dest=/opt/normalizer/
+#     state=directory
+# - copy:
+#     src=normalizer-assembly-0.1-SNAPSHOT.jar
+#     dest=/opt/normalizer
+#     owner=root
 - copy: src=etc/ dest=/etc/ owner=root
 - unarchive: src=normalizer-0.1-SNAPSHOT.tgz dest=/opt/
 - file: path=/opt/normalizers state=link src=/opt/normalizer-0.1-SNAPSHOT
-- service: name=normalizer-persist enabled=yes state=restarted
+- service: name={{ item }} enabled=yes state=restarted
+  with_items:
+      - normalizer-deploy
+      - normalizer-feature-simplifier
+      - normalizer-inspect
+      - normalizer-inspect-geotiff
+      - normalizer-inspect-zipped-shapefile
+      - normalizer-lease
+      - normalizer-persist
