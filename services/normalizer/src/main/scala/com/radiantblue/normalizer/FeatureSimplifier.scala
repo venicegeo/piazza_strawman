@@ -50,7 +50,7 @@ object FeatureSimplifier {
         }
       }
     }
-    requestThreads.foreach { _.join() }
+    (simplifyThreads ++ requestThreads).foreach { _.join() }
   }
 
   def connect(args: (String, java.io.Serializable)*): org.geotools.data.DataStore = {
