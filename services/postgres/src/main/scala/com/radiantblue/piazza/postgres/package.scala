@@ -107,7 +107,8 @@ package object postgres {
           ST_XMax(gm.latlon_bounds),
           ST_YMin(gm.latlon_bounds),
           ST_YMax(gm.latlon_bounds),
-          gm.native_format
+          gm.native_format,
+          m.jobId
         FROM metadata m JOIN geometadata gm USING (locator)
         WHERE locator = ?
         LIMIT 2
@@ -119,7 +120,8 @@ package object postgres {
             name=rs.getString(1),
             checksum=rs.getBytes(2).to[Vector],
             size=rs.getLong(3),
-            locator=locator)
+            locator=locator,
+            jobId=rs.getString(14))
           val geo = GeoMetadata(
             locator=locator,
             crsCode=rs.getString(4),
@@ -159,7 +161,8 @@ package object postgres {
           ST_XMax(gm.latlon_bounds),
           ST_YMin(gm.latlon_bounds),
           ST_YMax(gm.latlon_bounds),
-          gm.native_format
+          gm.native_format,
+          m.jobId
         FROM metadata m
           JOIN geometadata gm USING (locator)
           JOIN deployments d USING (locator)
@@ -173,7 +176,8 @@ package object postgres {
               name=rs.getString(1),
               checksum=rs.getBytes(2).to[Vector],
               size=rs.getLong(3),
-              locator=locator)
+              locator=locator,
+              jobId=rs.getString(14))
             val geo = GeoMetadata(
               locator=locator,
               crsCode=rs.getString(4),
