@@ -80,11 +80,13 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
       }
     } ~
     post {
-      formFields("data".as[BodyPart]) { data =>
+      // Adding Field for the PiazzaRequest payload
+      formFields("jobId".as[String], "data".as[BodyPart]) { (jobId, data) =>
         detach() {
+          // Firing existing message unchanged
           Deployer.withDeployer { dep =>
-            val locator = dep.dataStore.store(data)
-            fireUploadEvent(data.filename.getOrElse(""), locator)
+            val locator = dep.dataStore.store(data) // Add parameter here for JobID
+            fireUploadEvent(data.filename.getOrElse(""), locator, jobId) 
             redirect("/", StatusCodes.Found)
           }
         }
@@ -111,11 +113,12 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     } ~
     post {
       rawPathPrefix(Slash) {
-        (extract(_.request.uri) & formField('dataset)) { (uri, dataset) =>
-          onComplete(awaitDeployment(dataset)) {
+        (extract(_.request.uri) & formFields('dataset.?, 'jobId.?)) { (uri, dataset, jobId) =>
+          val actualDataSet = dataset.orElse(jobId.map(jdbcConnection.jobIdSearch(_))).get
+          onComplete(awaitDeployment(actualDataSet)) {
             case scala.util.Success(_) =>
               complete {
-                val redirectTo = uri.withQuery(Uri.Query("dataset" -> dataset))
+                val redirectTo = uri.withQuery(Uri.Query("dataset" -> actualDataSet))
                 HttpResponse(
                   StatusCodes.Found,
                   headers = List(HttpHeaders.Location(redirectTo)))
@@ -166,11 +169,12 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     pathPrefix("deployments") { deploymentsApi }
 
 
-  def fireUploadEvent(filename: String, storageKey: String): Unit = {
+  def fireUploadEvent(filename: String, storageKey: String, jobId: String): Unit = {
     val format = toJsonBytes[Upload]
     val upload = Upload(
       name=filename,
-      locator=storageKey)
+      locator=storageKey,
+      jobId)
     val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", format(upload))
     kafkaProducer.send(message)
   }

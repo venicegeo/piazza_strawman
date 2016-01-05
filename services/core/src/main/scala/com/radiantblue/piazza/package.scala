@@ -1,5 +1,7 @@
 package com.radiantblue.piazza
 
+import spray.json._
+
 /**
  * The DeployStatus trait is a message that is sent in response to
  * RequestDeploy, part of the Accessor service.
@@ -45,7 +47,7 @@ final case class Lease(id: Long, deployment: Long, lifetime: Option[java.sql.Tim
  * @param name the filename provided by the uploader
  * @param locator the resource locator assigned by the system
  */
-final case class Upload(name: String, locator: String)
+final case class Upload(name: String, locator: String, jobId: String)
 
 /**
  * A Metadata message indicates that metadata from a new dataset has been extracted.
@@ -54,7 +56,7 @@ final case class Upload(name: String, locator: String)
  * @param checksum the md5 checksum of the data
  * @param size the size of the data in bytes
  */
-final case class Metadata(name: String, locator: String, checksum: Vector[Byte], size: Long)
+final case class Metadata(name: String, locator: String, jobId: String, checksum: Vector[Byte], size: Long)
 
 /**
  * A GeoMetadata message indicates geospatial metadata from a new dataset.
@@ -122,6 +124,12 @@ final case class RequestDeploy(locator: String, deployId: Long, server: Server)
  * @param tolerance the tolerance for the simplify operation
  */
 final case class RequestSimplify(locator: String, tolerance: Double)
+
+
+// Patrick Messages
+final case class PiazzaRequest(apiKey: String, jobType: JsValue)
+
+
 
 /**
  * JobRequest messages go to a job manager.

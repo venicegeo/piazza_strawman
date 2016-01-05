@@ -15,11 +15,12 @@ which java
 
 # Create an SSH key just for this deployment
 ssh-keygen -N '' -f geoserver-files
+mkdir ansible/roles/deployer/files
 mv geoserver-files ansible/roles/deployer/files/
 mv geoserver-files.pub ansible/roles/geoserver_file_receiver/files/
 
 # Build Scala services
-(cd services/ && sbt/bin/sbt assembly universal:packageZipTarball)
+(cd services/ && sbt/bin/sbt universal:packageZipTarball)
 
 # Copy built artifacts
 . copy_builds.sh

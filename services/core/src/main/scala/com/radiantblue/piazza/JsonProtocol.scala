@@ -21,7 +21,7 @@ object JsonProtocol extends DefaultJsonProtocol {
         timestamp.toString.toJson
     }
   implicit val leaseFormat: RootJsonFormat[Lease] = jsonFormat4(Lease)
-  implicit val uploadFormat: RootJsonFormat[Upload] = jsonFormat2(Upload)
+  implicit val uploadFormat: RootJsonFormat[Upload] = jsonFormat3(Upload)
   implicit val boundsFormat: RootJsonFormat[Bounds] = jsonFormat4(Bounds)
   implicit val metadataFormat: RootJsonFormat[Metadata] = jsonFormat4(Metadata)
   implicit val geoMetadataFormat: RootJsonFormat[GeoMetadata] = jsonFormat5(GeoMetadata)
@@ -30,6 +30,8 @@ object JsonProtocol extends DefaultJsonProtocol {
   implicit val leaseGrantedFormat: RootJsonFormat[LeaseGranted] = jsonFormat3(LeaseGranted)
   implicit val requestDeployFormat: RootJsonFormat[RequestDeploy] = jsonFormat3(RequestDeploy)
   implicit val requestSimplifyFormat: RootJsonFormat[RequestSimplify] = jsonFormat2(RequestSimplify)
+  // Patrick Messages
+  implicit val piazzaRequestFormat: RootJsonFormat[PiazzaRequest] = jsonFormat2(PiazzaRequest)
 
   implicit val deployStatusFormat: RootJsonFormat[DeployStatus] = {
     implicit val startingFormat = jsonFormat1(Starting)

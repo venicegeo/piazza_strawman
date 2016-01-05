@@ -54,6 +54,7 @@ object Inspect {
             val metadata = Metadata(
               name=upload.name,
               locator=upload.locator,
+              jobId=upload.jobId,
               checksum=checksum.to[Vector],
               size=size)
             producer.send(new KeyedMessage("metadata", formatMetadata(metadata)))

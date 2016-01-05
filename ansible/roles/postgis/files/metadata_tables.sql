@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS metadata (
     id SERIAL PRIMARY KEY,
     locator VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
+    jobId VARCHAR NOT NULL,
     checksum VARCHAR NOT NULL,
     size BIGINT NOT NULL);
 

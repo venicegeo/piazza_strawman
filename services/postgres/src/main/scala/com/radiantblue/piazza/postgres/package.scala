@@ -49,6 +49,18 @@ package object postgres {
       }
     }
 
+    def jobIdSearch(jobId: String): String = {
+      val sql = """
+      SELECT m.locator FROM metadata m WHERE m.jobId = ?
+      """
+      prepare(sql) { ps =>
+        ps.setString(1, jobId)
+        iterate(ps) { results =>
+          results.getString(1)
+        }.head
+      }
+    }
+
     def keywordSearch(keyword: String): Vector[KeywordHit] = {
       val sql = """
       SELECT
@@ -343,12 +355,13 @@ package object postgres {
     }
 
     def insertMetadata(md: Metadata): Unit = {
-      val sql = "INSERT INTO metadata (name, locator, checksum, size) VALUES (?, ?, ?, ?)"
+      val sql = "INSERT INTO metadata (name, locator, jobId, checksum, size) VALUES (?, ?, ?, ?, ?)"
       prepare(sql) { ps =>
         ps.setString(1, md.name)
         ps.setString(2, md.locator)
-        ps.setString(3, md.checksum.map(b => f"$b%02x").mkString)
-        ps.setLong(4, md.size)
+        ps.setString(3, md.jobId)
+        ps.setString(4, md.checksum.map(b => f"$b%02x").mkString)
+        ps.setLong(5, md.size)
         ps.executeUpdate()
       }
     }
