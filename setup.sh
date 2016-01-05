@@ -23,9 +23,9 @@ mv geoserver-files.pub ansible/roles/geoserver_file_receiver/files/
 (cd services/ && sbt/bin/sbt universal:packageZipTarball)
 
 # Copy built artifacts
-. copy_builds.sh
+sh copy_builds.sh
 
 # Fetch software from offline that yum won't fetch for us
-. third-party-downloads.sh
+sh third-party-downloads.sh
 
 echo Finished successfully - ready to run.
