@@ -126,7 +126,7 @@ object FeatureSimplifier {
     val message = Upload(
       locator=file.getAbsolutePath,
       name="simplify-result",
-      jobId=???)
+      jobId= ???)
     val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", message.toJson.compactPrint.getBytes("utf-8"))
     producer.send(keyedMessage)
   }
