@@ -23,7 +23,7 @@ object JsonProtocol extends DefaultJsonProtocol {
   implicit val leaseFormat: RootJsonFormat[Lease] = jsonFormat4(Lease)
   implicit val uploadFormat: RootJsonFormat[Upload] = jsonFormat3(Upload)
   implicit val boundsFormat: RootJsonFormat[Bounds] = jsonFormat4(Bounds)
-  implicit val metadataFormat: RootJsonFormat[Metadata] = jsonFormat4(Metadata)
+  implicit val metadataFormat: RootJsonFormat[Metadata] = jsonFormat5(Metadata)
   implicit val geoMetadataFormat: RootJsonFormat[GeoMetadata] = jsonFormat5(GeoMetadata)
   implicit val serverFormat: RootJsonFormat[Server] = jsonFormat3(Server)
   implicit val requestLeaseFormat: RootJsonFormat[RequestLease] = jsonFormat3(RequestLease)
