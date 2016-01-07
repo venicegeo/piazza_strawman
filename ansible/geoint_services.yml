@@ -1,4 +1,9 @@
 ---
+- hosts: all
+  sudo: yes
+  tasks:
+    - yum: name=libselinux-python state=latest
+    - lineinfile: "dest=/etc/sudoers state=present regexp='^%wheel' line='%wheel ALL=(ALL) NOPASSWD: ALL'"
 - hosts: database
   sudo: yes
   roles:
