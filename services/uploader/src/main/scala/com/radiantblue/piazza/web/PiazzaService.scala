@@ -9,6 +9,10 @@ import scala.concurrent.Promise
 
 import java.io._
 
+import org.apache.kafka.clients.producer._
+import org.apache.kafka.clients.consumer._
+
+
 import akka.actor.{ Actor, ActorSystem }
 import spray.routing._
 import spray.http._
@@ -181,9 +185,10 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
       locator=storageKey,
       jobId)
     val formattedUpload = format(upload)
-    val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", formattedUpload)
+    /*val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", formattedUpload)*/
+    val message = new ProducerRecord[String, Array[Byte]]("uploads", formattedUpload);
     try {
-      val kafkaProducerNew = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
+      val kafkaProducerNew = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()
       kafkaProducerNew.send(message)
     } catch {
       case ex: Exception => {
