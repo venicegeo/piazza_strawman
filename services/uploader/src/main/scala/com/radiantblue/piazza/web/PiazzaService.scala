@@ -7,6 +7,8 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
 
+import java.io._
+
 import akka.actor.{ Actor, ActorSystem }
 import spray.routing._
 import spray.http._
@@ -38,7 +40,7 @@ class PiazzaServiceActor extends Actor with PiazzaService {
   def actorRefFactory = context
   def receive = runRoute(piazzaRoute)
 
-  def kafkaProducer: kafka.producer.Producer[String, Array[Byte]] = attemptKafka.get
+  val kafkaProducer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
   def jdbcConnection: java.sql.Connection = attemptJdbc.get
 
   private lazy val attemptKafka = new Attempt({
@@ -170,13 +172,27 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
 
 
   def fireUploadEvent(filename: String, storageKey: String, jobId: String): Unit = {
+    val fw = new PrintWriter(new File("loggerfile" ))
+    fw.write("file: " + filename + ", storageKey: " + storageKey + ", jobId: " + jobId + "\n")
+    fw.flush()
     val format = toJsonBytes[Upload]
     val upload = Upload(
       name=filename,
       locator=storageKey,
       jobId)
-    val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", format(upload))
-    kafkaProducer.send(message)
+    val formattedUpload = format(upload)
+    val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", formattedUpload)
+    try {
+      val kafkaProducerNew = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
+      kafkaProducerNew.send(message)
+    } catch {
+      case ex: Exception => {
+        fw.write("exception: " + ex)
+        fw.flush()
+      }
+    }
+    fw.write("Sent Kafka Message")
+    fw.close()
   }
 
   val piazzaRoute = pathPrefix("api")(apiRoute) ~ frontendRoute

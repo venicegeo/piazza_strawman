@@ -15,6 +15,8 @@ object Kafka {
     val props = new java.util.Properties
     props.put("zk.connect", zookeepers.mkString(","))
     props.put("metadata.broker.list", brokers.mkString(","))
+    props.put("retry.backoff.ms", "1000")
+    props.put("retries", "10")
     props.put("serializer.class", "kafka.serializer.DefaultEncoder")
     extraOpts.foreach { case (k, v) => props.put(k, v) }
     val producerConfig = new kafka.producer.ProducerConfig(props)

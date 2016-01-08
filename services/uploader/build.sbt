@@ -2,7 +2,7 @@ libraryDependencies ++= {
   val akkaV = "2.3.9"
   val sprayV = "1.3.3"
   Seq(
-    "org.apache.kafka" %% "kafka" % "0.8.2.2",
+    "org.apache.kafka" %% "kafka" % "0.9.0.0",
     "org.postgresql" % "postgresql" % "9.4-1203-jdbc42",
     "io.spray"            %%  "spray-can"     % sprayV,
     "io.spray"            %%  "spray-json"     % "1.3.2",
