@@ -5,7 +5,12 @@ import kafka.producer.KeyedMessage
 import com.radiantblue.piazza._
 import com.radiantblue.piazza.JsonProtocol._
 
+import java.io._
+import org.apache.kafka.clients.producer._
+import org.apache.kafka.clients.consumer._
+
 import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
 
 object InspectZippedShapefile {
   val logger = org.slf4j.LoggerFactory.getLogger(InspectZippedShapefile.getClass)
@@ -20,34 +25,46 @@ object InspectZippedShapefile {
   val formatMetadata = toJsonBytes[GeoMetadata]
 
   def main(args: Array[String]): Unit = {
-    val producer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
-    val consumer = com.radiantblue.piazza.kafka.Kafka.consumer("inspect-zipped-shapefile")
-    val streams = consumer.createMessageStreamsByFilter(Whitelist("uploads"))
-    val threads = streams.map { stream =>
-      thread {
-        stream.foreach { message =>
-          try {
-            val upload = parseUpload(message.message)
-            logger.info("Upload {}", upload)
-            val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
-            logger.info("path {}", path)
-            val result = InspectZippedShapefile.inspect(upload.locator, path.toFile)
+    val producer = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()
+    val consumer = com.radiantblue.piazza.kafka.Kafka.newConsumer[String, Array[Byte]]("inspect-zipped-shapefile")
 
-            result match {
-              case Left(ex) =>
-                logger.error("Failed to handle shapefile", ex)
-              case Right(metadata) =>
-                producer.send(new KeyedMessage("metadata", formatMetadata(metadata)))
-                logger.info("Emitted {}", metadata)
-            }
-          } catch {
-            case scala.util.control.NonFatal(ex) =>
-              logger.error("Failed to extract shapefile metadata", ex)
+    consumer.subscribe(java.util.Arrays.asList("uploads"))
+    val fw = new PrintWriter(new File("inspectshape" ))
+    fw.write("listening for message")
+    fw.flush()
+    while (true) {
+      val records = consumer.poll(100)
+      for(record <- records) {
+        fw.write("message received")
+        fw.flush()
+        val message = record.value()
+        try {
+          val upload = parseUpload(message)
+          fw.write("message parsed")
+          fw.flush()
+          logger.info("Upload {}", upload)
+          val path = (new com.radiantblue.deployer.FileSystemDatasetStorage()).lookup(upload.locator)
+          logger.info("path {}", path)
+          val result = InspectZippedShapefile.inspect(upload.locator, path.toFile)
+
+          result match {
+            case Left(ex) =>
+              fw.write("failed to handle shapefile")
+              fw.flush()
+              logger.error("Failed to handle shapefile", ex)
+            case Right(metadata) =>
+              fw.write("shapefile inspect emitted")
+              fw.flush()            
+              val message = new ProducerRecord[String, Array[Byte]]("metadata", formatMetadata(metadata));
+              producer.send(message)
+              logger.info("Emitted {}", metadata)
           }
+        } catch {
+          case scala.util.control.NonFatal(ex) =>
+            logger.error("Failed to extract shapefile metadata", ex)
         }
       }
     }
-    threads.foreach { _.join() }
   }
 
   private def geoMetadata(

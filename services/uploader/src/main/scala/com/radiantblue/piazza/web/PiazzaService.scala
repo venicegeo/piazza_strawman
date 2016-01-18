@@ -189,14 +189,17 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     val message = new ProducerRecord[String, Array[Byte]]("uploads", formattedUpload);
     try {
       val kafkaProducerNew = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()
-      kafkaProducerNew.send(message)
+      val future = kafkaProducerNew.send(message)
+      val futureValue = future.get()
+      fw.write("Sent Kafka Message")
+      fw.flush()
     } catch {
       case ex: Exception => {
         fw.write("exception: " + ex)
         fw.flush()
       }
     }
-    fw.write("Sent Kafka Message")
+    fw.write("Done procesing /datasets call")
     fw.close()
   }
 

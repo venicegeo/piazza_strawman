@@ -17,9 +17,9 @@ object Kafka {
     val props = new java.util.Properties
     /*props.put("zk.connect", zookeepers.mkString(","))*/
     props.put("metadata.broker.list", brokers.mkString(","))
-    props.put("bootstrap.servers", "192.168.33.12:9092");
-    props.put("backoff.increment.ms", "2000")
-    props.put("zk.read.num.retries", "10")
+    props.put("bootstrap.servers", "kafka.dev:9092");
+    props.put("backoff.increment.ms", "1000")
+    props.put("zk.read.num.retries", "3")
     props.put("serializer.class", "kafka.serializer.DefaultEncoder")
     extraOpts.foreach { case (k, v) => props.put(k, v) }
     val producerConfig = new kafka.producer.ProducerConfig(props)
@@ -29,7 +29,7 @@ object Kafka {
   def newProducer[K, T](extraOpts: (String, String)*): KafkaProducer[K, T] = {
     val props = new java.util.Properties
     /*props.put("zk.connect", zookeepers.mkString(","))*/
-    props.put("bootstrap.servers", "192.168.33.12:9092");
+    props.put("bootstrap.servers", "kafka.dev:9092");
     props.put("acks", "all");
     props.put("retries", "0");
     props.put("batch.size", "16384");
@@ -50,13 +50,13 @@ object Kafka {
 
   def newConsumer[K, T](groupId: String, extraOpts: (String, String)*): KafkaConsumer[K, T] = {
     val props = new java.util.Properties
-    props.put("bootstrap.servers", "192.168.33.12:9092");
+    props.put("bootstrap.servers", "kafka.dev:9092");
     props.put("group.id", groupId)
     props.put("enable.auto.commit", "true");
     props.put("auto.commit.interval.ms", "1000");
     props.put("session.timeout.ms", "30000");
     props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
-    props.put("value.deserializer", "org.apache.kafka.common.serialization.ByteArraySerializer");    
+    props.put("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");    
     new KafkaConsumer[K, T](props)
   }
 }
