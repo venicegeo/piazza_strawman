@@ -7,6 +7,12 @@ import com.radiantblue.piazza._
 import com.radiantblue.piazza.JsonProtocol._
 import com.radiantblue.piazza.postgres._
 
+import org.apache.kafka.clients.producer._
+import org.apache.kafka.clients.consumer._
+
+import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
+
 object Lease {
   val logger = org.slf4j.LoggerFactory.getLogger(Lease.getClass)
 
@@ -21,9 +27,51 @@ object Lease {
   val parseRequestLease = fromJsonBytes[RequestLease]
 
   def main(args: Array[String]): Unit = {
-    val producer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
-    val consumer = com.radiantblue.piazza.kafka.Kafka.consumer("lease")
-    val streams = consumer.createMessageStreamsByFilter(Whitelist("lease-requests"))
+    val producer = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()
+    val consumer = com.radiantblue.piazza.kafka.Kafka.newConsumer[String, Array[Byte]]("lease")
+    consumer.subscribe(java.util.Arrays.asList("lease-requests"))
+
+    while (true) {
+      val records = consumer.poll(1000)
+      for(record <- records) {
+        val message = record.value()
+        try {
+          Deployer.withDeployer { deployer =>
+            val request = parseRequestLease(message/*.message*/)
+            logger.info("Lease request: {}", request)
+            val status = deployer.track.deploymentStatus(request.locator)
+            status match {
+              case Starting(id) =>
+                deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
+                // no message sent at this point, grant will be sent on completion
+              case Live(id, server) =>
+                val format = toJsonBytes[LeaseGranted]
+                deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
+                // send message to lease-grants that lease is granted
+                val formattedLease = LeaseGranted(
+                  locator=request.locator,
+                  timeout=request.timeout,
+                  tag=request.tag)
+                val keyedMessage = new ProducerRecord[String, Array[Byte]]("lease-grants", formatLeaseGranted(formattedLease));
+                producer.send(keyedMessage)
+              case Dead =>
+                val (server, id) = deployer.track.deploymentStarted(request.locator)
+                deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
+                val formattedDeploy = RequestDeploy(
+                  locator=request.locator,
+                  server=server,
+                  deployId=id)
+                val keyedMessage = new ProducerRecord[String, Array[Byte]]("deploy-requests", formatRequestDeploy(formattedDeploy));
+                producer.send(keyedMessage)
+            }
+          }
+        } catch {
+          case scala.util.control.NonFatal(ex) => logger.error("Error in lease manager", ex)
+        }
+      }
+    }
+
+    /*val streams = consumer.createMessageStreamsByFilter(Whitelist("lease-requests"))
     val threads = streams.map { stream =>
       thread {
         stream.foreach { message =>
@@ -61,6 +109,6 @@ object Lease {
         }
       }
     }
-    threads.foreach { _.join() }
+    threads.foreach { _.join() }*/
   }
 }

@@ -55,8 +55,8 @@ object InspectZippedShapefile {
             case Right(metadata) =>
               fw.write("shapefile inspect emitted")
               fw.flush()            
-              val message = new ProducerRecord[String, Array[Byte]]("metadata", formatMetadata(metadata));
-              producer.send(message)
+              val keyedMessage = new ProducerRecord[String, Array[Byte]]("metadata", formatMetadata(metadata));
+              producer.send(keyedMessage)
               logger.info("Emitted {}", metadata)
           }
         } catch {

@@ -7,6 +7,12 @@ import com.radiantblue.piazza.{ kafka => _, _}
 import spray.json._
 import JsonProtocol._
 
+import org.apache.kafka.clients.producer._
+import org.apache.kafka.clients.consumer._
+
+import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
+
 object FeatureSimplifier {
   val logger = org.slf4j.LoggerFactory.getLogger(FeatureSimplifier.getClass)
 
@@ -20,9 +26,36 @@ object FeatureSimplifier {
   val parseGrant = fromJsonBytes[LeaseGranted]
 
   def main(args: Array[String]): Unit = {
-    val producer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
-    val consumer = com.radiantblue.piazza.kafka.Kafka.consumer("feature-simplifier")
-    val requestStreams = consumer.createMessageStreamsByFilter(Whitelist("simplify-requests"))
+    val producer = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()
+    val consumer = com.radiantblue.piazza.kafka.Kafka.newConsumer[String, Array[Byte]]("feature-simplifier")
+    /*val requestStreams = consumer.createMessageStreamsByFilter(Whitelist("simplify-requests"))*/
+    consumer.subscribe(java.util.Arrays.asList("simplify-requests", "lease-grants"))
+
+    while (true) {
+      val records = consumer.poll(1000)
+      for(record <- records) {
+        val message = record.value()
+        if (record.topic() == "simplify-requests") {
+          try {
+            val simplify = parseRequest(message/*.message*/)
+            receiveJob(simplify.locator, simplify.tolerance, producer)
+            logger.debug("Simplify {}", simplify)
+          } catch {
+            case scala.util.control.NonFatal(ex) => logger.error("Failure in simplifier service", ex)
+          }
+        } else if (record.topic() == "lease-grants") {
+          try {
+            val grant = parseGrant(message/*.message*/)
+            receiveLease(grant, producer)
+            logger.info("Grant {}", grant)
+          } catch {
+            case scala.util.control.NonFatal(ex) => logger.error("Failure in simplifier executor", ex)
+          }
+        }
+      }
+    }
+
+/*
     val requestThreads = requestStreams.map { stream =>
       thread {
         stream.foreach { message =>
@@ -36,7 +69,7 @@ object FeatureSimplifier {
         }
       }
     }
-    val simplifyStreams = consumer.createMessageStreamsByFilter(Whitelist("lease-grants"))
+    /*val simplifyStreams = consumer.createMessageStreamsByFilter(Whitelist("lease-grants"))*/
     val simplifyThreads = simplifyStreams.map { stream =>
       thread {
         stream.foreach { message =>
@@ -51,6 +84,7 @@ object FeatureSimplifier {
       }
     }
     (simplifyThreads ++ requestThreads).foreach { _.join() }
+    */
   }
 
   def connect(args: (String, java.io.Serializable)*): org.geotools.data.DataStore = {
@@ -109,12 +143,13 @@ object FeatureSimplifier {
 
   private def getResultFile: java.io.File =
     java.nio.file.Files.createTempDirectory("feature-simplifier-work").toFile
-  private def requestLease(locator: String, timeout: Long, tag: Array[Byte], producer: kafka.producer.Producer[String, Array[Byte]]): Unit = {
+  private def requestLease(locator: String, timeout: Long, tag: Array[Byte], producer: KafkaProducer[String, Array[Byte]]): Unit = {
     val message = RequestLease(
       locator=locator,
       timeout=timeout,
       tag=tag.to[Vector])
-    val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("lease-requests", message.toJson.compactPrint.getBytes("utf-8"))
+    /*val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("lease-requests", message.toJson.compactPrint.getBytes("utf-8"))*/
+    val keyedMessage = new ProducerRecord[String, Array[Byte]]("lease-requests", message.toJson.compactPrint.getBytes("utf-8"));
     producer.send(keyedMessage)
   }
 
@@ -122,12 +157,13 @@ object FeatureSimplifier {
     new java.net.URL(
       s"http://192.168.23.11:8080/api/deployments?dataset=${g.locator}&SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities")
 
-  private def publish(file: java.io.File, producer: kafka.producer.Producer[String, Array[Byte]]): Unit = {
+  private def publish(file: java.io.File, producer: KafkaProducer[String, Array[Byte]]): Unit = {
     val message = Upload(
       locator=file.getAbsolutePath,
       name="simplify-result",
       jobId= ???)
-    val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", message.toJson.compactPrint.getBytes("utf-8"))
+    /*val keyedMessage = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", message.toJson.compactPrint.getBytes("utf-8"))*/
+    val keyedMessage = new ProducerRecord[String, Array[Byte]]("uploads", message.toJson.compactPrint.getBytes("utf-8"));
     producer.send(keyedMessage)
   }
 
@@ -158,7 +194,7 @@ object FeatureSimplifier {
     buff.array
   }
 
-  def receiveJob(locator: String, tolerance: Double, producer: kafka.producer.Producer[String, Array[Byte]]): Unit = {
+  def receiveJob(locator: String, tolerance: Double, producer: KafkaProducer[String, Array[Byte]]): Unit = {
     val tag = randomTag()
     synchronized {
       context += (tag.toSeq -> (locator, tolerance))
@@ -166,7 +202,7 @@ object FeatureSimplifier {
     requestLease(locator, 60 * 60 * 1000, tag, producer)
   }
 
-  def receiveLease(g: LeaseGranted, producer: kafka.producer.Producer[String, Array[Byte]]): Unit = {
+  def receiveLease(g: LeaseGranted, producer: KafkaProducer[String, Array[Byte]]): Unit = {
     val ctx = synchronized {
       val result = context.get(g.tag)
       context -= g.tag
