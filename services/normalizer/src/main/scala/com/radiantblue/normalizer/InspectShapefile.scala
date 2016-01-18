@@ -33,7 +33,7 @@ object InspectZippedShapefile {
     fw.write("listening for message")
     fw.flush()
     while (true) {
-      val records = consumer.poll(100)
+      val records = consumer.poll(1000)
       for(record <- records) {
         fw.write("message received")
         fw.flush()

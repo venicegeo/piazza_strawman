@@ -34,7 +34,7 @@ object Inspect {
     fw.flush()
     /*val streams = consumer.createMessageStreamsByFilter(Whitelist("uploads"))*/
     while (true) {
-      val records = consumer.poll(100)
+      val records = consumer.poll(1000)
       for(record <- records) {    
         try {
           val message = record.value()

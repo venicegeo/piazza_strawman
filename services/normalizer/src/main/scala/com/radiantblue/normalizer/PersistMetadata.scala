@@ -34,7 +34,7 @@ object Persist {
     /*val streams = consumer.createMessageStreamsByFilter(Whitelist("metadata"))*/
     val conn = Postgres("piazza.metadata.postgres").connect()
     while (true) {
-      val records = consumer.poll(100)
+      val records = consumer.poll(1000)
       for(record <- records) {   
         fw.write("consuming message on persist")
         fw.flush()     

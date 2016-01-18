@@ -17,4 +17,4 @@ libraryDependencies ++= {
   )
 }
 
-mainClass in Compile := Some("com.radiantblue.piazza.Persist")
+mainClass in Compile := Some("com.radiantblue.normalizer.Persist")
