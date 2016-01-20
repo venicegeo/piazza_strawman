@@ -41,7 +41,7 @@ object InspectGeoTiff {
           val result = InspectGeoTiff.inspect(upload.locator, path.toFile)
 
           result.foreach { r =>
-            val keyedMessage = new ProducerRecord[String, Array[Byte]]("metadata", formatMetadata(r));
+            val keyedMessage = new ProducerRecord[String, Array[Byte]]("metadata", formatMetadata(r))
             producer.send(keyedMessage)
             /*producer.send(new KeyedMessage("metadata", formatMetadata(r)))*/
             logger.debug("Emitted {}", r)

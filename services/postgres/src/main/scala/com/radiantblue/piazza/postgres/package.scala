@@ -51,7 +51,7 @@ package object postgres {
 
     def jobIdSearch(jobId: String): String = {
       val sql = """
-      SELECT m.locator FROM metadata m WHERE m.jobId = ?
+      SELECT m.locator FROM metadata m WHERE m.jobid = ?
       """
       prepare(sql) { ps =>
         ps.setString(1, jobId)

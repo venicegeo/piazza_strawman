@@ -7,6 +7,7 @@ import com.radiantblue.piazza._
 import com.radiantblue.piazza.JsonProtocol._
 import com.radiantblue.piazza.postgres._
 
+import java.io._
 import org.apache.kafka.clients.producer._
 import org.apache.kafka.clients.consumer._
 
@@ -31,15 +32,24 @@ object Lease {
     val consumer = com.radiantblue.piazza.kafka.Kafka.newConsumer[String, Array[Byte]]("lease")
     consumer.subscribe(java.util.Arrays.asList("lease-requests"))
 
+    val fw = new PrintWriter(new File("leaser" ))
+
     while (true) {
       val records = consumer.poll(1000)
       for(record <- records) {
         val message = record.value()
+        
+        fw.write("Received Lease request.\n")
+        fw.flush()
         try {
           Deployer.withDeployer { deployer =>
             val request = parseRequestLease(message/*.message*/)
             logger.info("Lease request: {}", request)
             val status = deployer.track.deploymentStatus(request.locator)
+
+            fw.write("Matching status of lease.\n")
+            fw.flush()
+
             status match {
               case Starting(id) =>
                 deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
@@ -52,21 +62,26 @@ object Lease {
                   locator=request.locator,
                   timeout=request.timeout,
                   tag=request.tag)
-                val keyedMessage = new ProducerRecord[String, Array[Byte]]("lease-grants", formatLeaseGranted(formattedLease));
+                val keyedMessage = new ProducerRecord[String, Array[Byte]]("lease-grants", formatLeaseGranted(formattedLease))
                 producer.send(keyedMessage)
               case Dead =>
+                fw.write("Dead. Starting deployment of new service.\n")
+                fw.flush()
                 val (server, id) = deployer.track.deploymentStarted(request.locator)
                 deployer.leasing.attachLease(request.locator, id, request.tag.to[Array])
                 val formattedDeploy = RequestDeploy(
                   locator=request.locator,
                   server=server,
                   deployId=id)
-                val keyedMessage = new ProducerRecord[String, Array[Byte]]("deploy-requests", formatRequestDeploy(formattedDeploy));
+                val keyedMessage = new ProducerRecord[String, Array[Byte]]("deploy-requests", formatRequestDeploy(formattedDeploy))
                 producer.send(keyedMessage)
             }
           }
         } catch {
-          case scala.util.control.NonFatal(ex) => logger.error("Error in lease manager", ex)
+          case ex: Exception => {
+            fw.write("Error in leaser: " + ex + ".\n")
+            fw.flush()          
+          }          
         }
       }
     }
@@ -110,5 +125,6 @@ object Lease {
       }
     }
     threads.foreach { _.join() }*/
+    fw.close()
   }
 }

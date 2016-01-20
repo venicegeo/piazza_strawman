@@ -15,6 +15,8 @@ import spray.httpx.marshalling.Marshaller
 import com.radiantblue.piazza._
 import com.radiantblue.piazza.postgres._
 
+import java.io._
+
 /**
  * A MetadataStore is able to retrieve recorded metadata and geospatial metadata by locator string.
  */
@@ -346,7 +348,6 @@ sealed class GeoServerPublish
         <title>{md.name}</title>
         <keywords>
           <string>features</string>
-          <string>{md.name}</string>
         </keywords>
         <nativeCRS>{ geo.crsCode }</nativeCRS>
         <srs>{ geo.crsCode }</srs>

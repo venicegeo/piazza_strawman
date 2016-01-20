@@ -11,7 +11,8 @@ import java.io._
 
 import org.apache.kafka.clients.producer._
 import org.apache.kafka.clients.consumer._
-
+import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
 
 import akka.actor.{ Actor, ActorSystem }
 import spray.routing._
@@ -44,12 +45,12 @@ class PiazzaServiceActor extends Actor with PiazzaService {
   def actorRefFactory = context
   def receive = runRoute(piazzaRoute)
 
-  val kafkaProducer = com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
+  val kafkaProducer = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()
   def jdbcConnection: java.sql.Connection = attemptJdbc.get
-
+/*
   private lazy val attemptKafka = new Attempt({
     com.radiantblue.piazza.kafka.Kafka.producer[String, Array[Byte]]()
-  })
+  })*/
 
   private lazy val attemptJdbc = new Attempt({
     com.radiantblue.piazza.postgres.Postgres("piazza.metadata.postgres").connect()
@@ -62,7 +63,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
   implicit def actorSystem: ActorSystem
   implicit def futureContext: ExecutionContext
 
-  def kafkaProducer: kafka.producer.Producer[String, Array[Byte]]
+  def kafkaProducer: KafkaProducer[String, Array[Byte]]
   def jdbcConnection: java.sql.Connection
 
   private val frontendRoute =
@@ -92,7 +93,7 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
           // Firing existing message unchanged
           Deployer.withDeployer { dep =>
             val locator = dep.dataStore.store(data) // Add parameter here for JobID
-            fireUploadEvent(data.filename.getOrElse(""), locator, jobId) 
+            fireUploadEvent(data.filename.getOrElse(locator), locator, jobId) 
             redirect("/", StatusCodes.Found)
           }
         }
@@ -120,17 +121,22 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
     post {
       rawPathPrefix(Slash) {
         (extract(_.request.uri) & formFields('dataset.?, 'jobId.?)) { (uri, dataset, jobId) =>
+          val fw = new PrintWriter(new File("deployments" ))
+          fw.write("Requesting JobID")
+          fw.flush()
           val actualDataSet = dataset.orElse(jobId.map(jdbcConnection.jobIdSearch(_))).get
+          fw.write("JobID request for " + jobId + " and located " + actualDataSet + "\n")
+          fw.close()
           onComplete(awaitDeployment(actualDataSet)) {
             case scala.util.Success(_) =>
-              complete {
+              complete {            
                 val redirectTo = uri.withQuery(Uri.Query("dataset" -> actualDataSet))
                 HttpResponse(
                   StatusCodes.Found,
                   headers = List(HttpHeaders.Location(redirectTo)))
               }
             case scala.util.Failure(_) =>
-              complete {
+              complete {                        
                 HttpResponse(
                   StatusCodes.BadRequest,
                   s"Cannot deploy dataset $dataset")
@@ -186,11 +192,11 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
       jobId)
     val formattedUpload = format(upload)
     /*val message = new kafka.producer.KeyedMessage[String, Array[Byte]]("uploads", formattedUpload)*/
-    val message = new ProducerRecord[String, Array[Byte]]("uploads", formattedUpload);
+    val message = new ProducerRecord[String, Array[Byte]]("uploads", formattedUpload)
     try {
-      val kafkaProducerNew = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()
-      val future = kafkaProducerNew.send(message)
-      val futureValue = future.get()
+      /*val kafkaProducerNew = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()*/
+      val future = kafkaProducer.send(message)
+      val futureValue = future.get() /* debug; blocking to check for errors in transmission */
       fw.write("Sent Kafka Message")
       fw.flush()
     } catch {
@@ -206,10 +212,13 @@ trait PiazzaService extends HttpService with PiazzaJsonProtocol {
   val piazzaRoute = pathPrefix("api")(apiRoute) ~ frontendRoute
 }
 
-class LeaseClient[C](val kafkaProducer: kafka.producer.Producer[String, Array[Byte]]) {
+class LeaseClient[C](val kafkaProducer: KafkaProducer[String, Array[Byte]]) {
   val format = toJsonBytes[RequestLease]
   var pending: Map[Seq[Byte], C] = Map.empty
   def requestLease(locator: String, timeout: Long, context: C): Unit = {
+    val fw = new PrintWriter(new File("leaseclient" ))
+    fw.write("Requesting Lease for locator " + locator)
+    fw.flush()    
     val tag = leaseTag()
     synchronized {
       pending += (tag.toSeq -> context)
@@ -238,6 +247,15 @@ class LeaseClient[C](val kafkaProducer: kafka.producer.Producer[String, Array[By
     buffer.array()
   }
 
-  private def sendToKafkaQueue(queue: String, value: Array[Byte]): Unit =
-    kafkaProducer.send(new kafka.producer.KeyedMessage(queue, value))
+  private def sendToKafkaQueue(queue: String, value: Array[Byte]): Unit = {
+    val fw = new PrintWriter(new File("kafkaqueue" ))
+    fw.write("Requesting Kafka queue " + queue)
+    fw.flush()
+    /* TODO: Why does the send fail if I use the kafkaProducer member? */
+    val producer = com.radiantblue.piazza.kafka.Kafka.newProducer[String, Array[Byte]]()
+    val message = new ProducerRecord[String, Array[Byte]](queue, value)
+    producer.send(message)
+    fw.write("sent kafka message from lease client ")
+    fw.close()
+  }
 }

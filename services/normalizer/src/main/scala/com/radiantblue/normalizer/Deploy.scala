@@ -7,6 +7,8 @@ import com.radiantblue.piazza._
 import com.radiantblue.piazza.JsonProtocol._
 import com.radiantblue.piazza.postgres._
 
+import java.io._
+
 import org.apache.kafka.clients.producer._
 import org.apache.kafka.clients.consumer._
 
@@ -32,21 +34,35 @@ object Deploy {
     /*val streams = consumer.createMessageStreamsByFilter(Whitelist("deploy-requests"))*/
     val postgres = Postgres("piazza.metadata.postgres").connect()
 
+    val fw = new PrintWriter(new File("deployer"))
+
     while (true) {
       val records = consumer.poll(1000)
       for(record <- records) {
         val message = record.value()
+        fw.write("Received Deployment request.\n")
+        fw.flush()
         try {
           val request = parseRequestDeploy(message/*.message*/)
           Deployer.withDeployer { deployer =>
             logger.info("Deploy request: {}", request)
             val (metadata, geometadata) = deployer.metadataStore.lookup(request.locator)
+            fw.write("Looked up metadata locator " + metadata.locator + " with jobid " + metadata.jobId + " and geometadata " + geometadata.locator + "\n")
+            fw.flush()
             val resource = deployer.dataStore.lookup(request.locator)
+            fw.write("Looking up resource from datastore  " + resource + "\n")
+            fw.flush()
             deployer.publish.publish(metadata, geometadata, resource, request.server)
+            fw.write("Publishing to " + request.server.host + " and local path " + request.server.localPath + " and tracking deployment " + request.deployId + " \n")
+            fw.flush()
             deployer.track.deploymentSucceeded(request.deployId)
+            fw.write("Tracking deployment\n")
+            fw.flush()
             val deployments = postgres.getLeasesByDeployment(request.deployId)
             logger.info("Reporting success for deployments: {}", deployments)
             for (lease <- deployments) {
+              fw.write("Received Lease for deployment: " + lease.id + ", " + lease.deployment + " \n")
+              fw.flush()
               val grant = LeaseGranted(
                 locator=request.locator,
                 timeout=0,
@@ -54,11 +70,16 @@ object Deploy {
               logger.info("After successful deploy {}", grant)
               val relayedMessage = new ProducerRecord[String, Array[Byte]]("metadata", formatLeaseGranted(grant));
               producer.send(relayedMessage)
+              fw.write("Deployment metadata message relayed.\n\n")
+              fw.flush()              
             }
           }
         } catch {
-          case scala.util.control.NonFatal(ex) =>
+          case ex: Exception => {
+            fw.write("Deployment failed: " + ex + "\n")
+            fw.flush()          
             logger.error("Deployment failed", ex)
+          }          
         }
       }
     }

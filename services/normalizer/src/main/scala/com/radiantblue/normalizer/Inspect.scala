@@ -70,7 +70,7 @@ object Inspect {
             jobId=upload.jobId,
             checksum=checksum.to[Vector],
             size=size)
-          val forwardedMessage = new ProducerRecord[String, Array[Byte]]("metadata", formatMetadata(metadata));
+          val forwardedMessage = new ProducerRecord[String, Array[Byte]]("metadata", formatMetadata(metadata))
           /*producer.send(new KeyedMessage("metadata", formatMetadata(metadata)))*/
           producer.send(forwardedMessage)
           logger.debug(s"Emitted $metadata")
